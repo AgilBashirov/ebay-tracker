@@ -129,14 +129,26 @@ Bundan sonra hər saat özü işləyəcək.
 | B | Amazon Link | **Siz** |
 | C | Məhsul Adı | avtomatik |
 | D | eBay Qiymətim | avtomatik (eBay linkindən) |
-| E | Amazon (əvvəlki) | avtomatik |
-| F | Amazon (indiki) | avtomatik |
-| G | Stok | avtomatik |
-| H | Marja $ | avtomatik |
-| I | Marja % | avtomatik |
-| J | Tövsiyə eBay | avtomatik |
-| K | Son Yoxlama | avtomatik |
-| L | Status | avtomatik |
+| E | eBay Say | avtomatik (listinginizdəki qalıq) |
+| F | Amazon (əvvəlki) | avtomatik |
+| G | Amazon (indiki) | avtomatik |
+| H | Stok | avtomatik |
+| I | Marja $ | avtomatik |
+| J | Marja % | avtomatik |
+| K | Tövsiyə eBay | avtomatik |
+| L | Son Yoxlama | avtomatik |
+| M | Status | avtomatik |
+
+### Stok bildirişi məntiqi
+
+eBay listinginizdəki qalıq say nəzərə alınır ki, lazımsız bildiriş gəlməsin:
+
+| eBay sayınız | Amazon | Bildiriş |
+|---|---|---|
+| 0 | stokda yoxdur | 🔕 gəlmir — listing onsuz da bağlıdır |
+| 0 | **stoka gəlib** | ✅ "Listingi yenidən açın" + gözlənilən marja |
+| >0 | stokda yoxdur | ✅ Təcili: listingi dayandırın |
+| >0 | stokda var | qiymət/marja qaydası ilə |
 
 **Yeni məhsul əlavə etmək:** sadəcə A və B sütunlarına linkləri yazın. Qalanını sistem özü dolduracaq — heç bir ayar dəyişikliyi lazım deyil.
 

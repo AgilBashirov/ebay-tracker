@@ -91,16 +91,17 @@ def apply_layout(ws):
     widths = {
         1: 150,   # A eBay Link
         2: 150,   # B Amazon Link
-        3: 300,   # C Məhsul Adı
+        3: 290,   # C Məhsul Adı
         4: 95,    # D eBay Qiymətim
-        5: 100,   # E Amazon (əvvəlki)
-        6: 100,   # F Amazon (indiki)
-        7: 145,   # G Stok
-        8: 85,    # H Marja $
-        9: 80,    # I Marja %
-        10: 105,  # J Tövsiyə eBay
-        11: 120,  # K Son Yoxlama
-        12: 125,  # L Status
+        5: 70,    # E eBay Say
+        6: 100,   # F Amazon (əvvəlki)
+        7: 100,   # G Amazon (indiki)
+        8: 145,   # H Stok
+        9: 85,    # I Marja $
+        10: 80,   # J Marja %
+        11: 105,  # K Tövsiyə eBay
+        12: 120,  # L Son Yoxlama
+        13: 150,  # M Status
     }
     for col, px in widths.items():
         reqs.append({
@@ -137,17 +138,19 @@ def apply_layout(ws):
             }
         })
 
-    align(1, 3, "LEFT")     # linklər + ad
-    align(4, 6, "RIGHT")    # qiymətlər
-    align(7, 7, "LEFT")     # stok mətni
-    align(8, 10, "RIGHT")   # marja + təklif
-    align(11, 12, "CENTER")  # tarix + status
+    align(1, 3, "LEFT")      # A-C linklər + ad
+    align(4, 4, "RIGHT")     # D eBay qiyməti
+    align(5, 5, "CENTER")    # E eBay say
+    align(6, 7, "RIGHT")     # F-G Amazon qiymətləri
+    align(8, 8, "LEFT")      # H stok mətni
+    align(9, 11, "RIGHT")    # I-K marja + təklif
+    align(12, 13, "CENTER")  # L-M tarix + status
 
     # ---- Status sütunu qalın ----
     reqs.append({
         "repeatCell": {
             "range": {"sheetId": sheet_id, "startRowIndex": 1,
-                      "startColumnIndex": 11, "endColumnIndex": 12},
+                      "startColumnIndex": 12, "endColumnIndex": 13},
             "cell": {"userEnteredFormat": {
                 "textFormat": {"fontSize": 10, "bold": True}}},
             "fields": "userEnteredFormat.textFormat",
@@ -189,12 +192,21 @@ def read_rows(ws):
                 "amazon_link": amazon,
                 "product_name": padded[config.COL["product_name"] - 1].strip(),
                 "ebay_price": _to_float(padded[config.COL["ebay_price"] - 1]),
+                "ebay_qty": _to_int(padded[config.COL["ebay_qty"] - 1]),
+                # Keçən dəfənin "indiki" qiyməti bu dəfənin "əvvəlki"sidir
                 "amazon_old": _to_float(padded[config.COL["amazon_new"] - 1]),
                 "stock_old": padded[config.COL["stock"] - 1].strip(),
                 "last_check": padded[config.COL["last_check"] - 1].strip(),
             }
         )
     return rows
+
+
+def _to_int(text):
+    if text is None or str(text).strip() == "":
+        return None
+    digits = "".join(ch for ch in str(text) if ch.isdigit())
+    return int(digits) if digits else None
 
 
 def _to_float(text):
@@ -256,13 +268,15 @@ def write_results(ws, results):
     updates = []
     for r in results:
         row = r["row"]
+        qty = r.get("ebay_qty")
         updates.append(
             {
-                "range": f"C{row}:L{row}",
+                "range": f"C{row}:M{row}",
                 "values": [
                     [
                         r.get("product_name", ""),
                         _fmt_money(r.get("ebay_price")),
+                        "" if qty is None else str(qty),
                         _fmt_money(r.get("amazon_old")),
                         _fmt_money(r.get("amazon_new")),
                         r.get("stock", ""),
@@ -296,6 +310,8 @@ def _apply_row_colors(ws, results):
         "QIYMET-":   {"red": 0.89, "green": 0.95, "blue": 1.00},  # mavi
         "AZ":        {"red": 1.00, "green": 0.97, "blue": 0.80},  # sarı (AZ MARJA)
         "STOK":      {"red": 0.99, "green": 0.85, "blue": 0.85},  # qırmızı (STOK YOX)
+        "STOK_PASSIV": {"red": 0.96, "green": 0.96, "blue": 0.96},  # solğun (eBay bağlı)
+        "TEKRAR":    {"red": 0.85, "green": 0.93, "blue": 0.99},  # mavi (yenidən aç)
         "XETA":      {"red": 0.93, "green": 0.93, "blue": 0.93},  # boz
         "BLOKLANDI": {"red": 0.91, "green": 0.89, "blue": 0.98},  # bənövşəyi
     }
@@ -303,6 +319,8 @@ def _apply_row_colors(ws, results):
     for r in results:
         status = r.get("status") or "OK"
         key = status.split()[0]
+        if key == "STOK" and "bağlı" in status:
+            key = "STOK_PASSIV"
         color = palette.get(key, palette["OK"])
         requests.append(
             {

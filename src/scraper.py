@@ -275,6 +275,25 @@ EBAY_PRICE_PATTERNS = [
 ]
 
 
+# Listinginizdəki qalıq say. "10 available", "More than 10 available",
+# "Last one" və s. formatlarında olur.
+EBAY_QTY_PATTERNS = [
+    r'class="x-quantity__availability"[^>]*>.*?(?:<span[^>]*>)?\s*(More than [\d,]+|[\d,]+)\s+available',
+    r'id="qtySubTxt"[^>]*>.*?(More than [\d,]+|[\d,]+)\s+available',
+    r'"quantityAvailable"\s*:\s*(\d+)',
+    r'"availableQuantity"\s*:\s*(\d+)',
+    r'>\s*(More than [\d,]+|[\d,]+)\s+available\s*<',
+]
+
+EBAY_SOLDOUT_MARKERS = [
+    "out of stock",
+    "this listing has ended",
+    "this listing was ended",
+    "no longer available",
+    "item is out of stock",
+]
+
+
 def _parse_ebay_price(html: str) -> float | None:
     for pat in EBAY_PRICE_PATTERNS:
         m = re.search(pat, html, re.S | re.I)
@@ -288,30 +307,58 @@ def _parse_ebay_price(html: str) -> float | None:
     return None
 
 
-def scrape_ebay_price(browser: Browser, url: str, api_mode: bool = False) -> float | None:
+def _parse_ebay_qty(html: str) -> int | None:
     """
-    eBay listinginizin qiymətini oxuyur.
-    Birbaşa alınmasa (eBay də bot qorumasına malikdir) API kanalına keçir.
+    eBay listinginizdəki qalıq sayı qaytarır.
+    0  -> satışda deyil / bitib
+    None -> oxuna bilmədi (qərar verərkən "naməlum" kimi baxılır)
     """
-    if not url or not url.startswith("http"):
-        return None
+    low = html.lower()
 
+    if any(m in low for m in EBAY_SOLDOUT_MARKERS):
+        return 0
+
+    if re.search(r"\blast one\b", low):
+        return 1
+
+    for pat in EBAY_QTY_PATTERNS:
+        m = re.search(pat, html, re.S | re.I)
+        if m:
+            raw = m.group(1)
+            digits = re.sub(r"[^\d]", "", raw)
+            if digits:
+                qty = int(digits)
+                # "More than 10 available" -> ən azı 11, biz 10-dan çox kimi qeyd edirik
+                return qty
+    return None
+
+
+def scrape_ebay_info(browser: Browser, url: str, api_mode: bool = False) -> dict:
+    """
+    eBay listinginizdən qiymət və qalıq sayı oxuyur.
+    Birbaşa alınmasa (eBay-in də bot qoruması var) API kanalına keçir.
+    Qaytarır: {"price": float|None, "qty": int|None}
+    """
+    empty = {"price": None, "qty": None}
+    if not url or not url.startswith("http"):
+        return empty
+
+    html = None
     if not api_mode:
         try:
-            html, status = browser.fetch_html(url)
-            if status < 400:
-                price = _parse_ebay_price(html)
-                if price is not None:
-                    return price
+            fetched, status = browser.fetch_html(url)
+            if status < 400 and fetched:
+                html = fetched
         except Exception:
-            pass
+            html = None
 
-    # Birbaşa alınmadı → API kanalı
-    if config.has_api_fallback():
+    if html is None and config.has_api_fallback():
         html = fetch_via_fallback(url)
-        if html:
-            return _parse_ebay_price(html)
-    return None
+
+    if not html:
+        return empty
+
+    return {"price": _parse_ebay_price(html), "qty": _parse_ebay_qty(html)}
 
 
 # ---------------------------------------------------------------------------

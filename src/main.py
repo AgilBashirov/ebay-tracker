@@ -122,19 +122,25 @@ def run(health_report: bool = False) -> int:
             processed += 1
 
             # --- eBay qiyməti ---
+            # eBay qiyməti + qalıq say.
+            # Qalıq sayı hər dəfə oxuyuruq — qərar məntiqi ondan asılıdır.
             ebay_price = row["ebay_price"]
-            if config.EBAY_PRICE_SOURCE == "scrape" and sheets.needs_ebay_refresh(row):
+            ebay_qty = row["ebay_qty"]
+            if config.EBAY_PRICE_SOURCE == "scrape":
                 if not api_mode:
                     scraper.polite_delay()
-                fetched = scraper.scrape_ebay_price(
+                info = scraper.scrape_ebay_info(
                     browser, row["ebay_link"], api_mode=api_mode
                 )
-                if fetched:
-                    ebay_price = fetched
-                    print(f"    eBay qiyməti oxundu: ${fetched:,.2f}")
+                if info["price"]:
+                    ebay_price = info["price"]
+                if info["qty"] is not None:
+                    ebay_qty = info["qty"]
+                if info["price"] is None and info["qty"] is None:
+                    print("    ⚠️  eBay səhifəsi oxuna bilmədi "
+                          "(D/E sütunlarını əl ilə doldura bilərsiniz)")
                 else:
-                    print("    ⚠️  eBay qiyməti oxuna bilmədi "
-                          "(D sütununu əl ilə doldura bilərsiniz)")
+                    print(f"    eBay: qiymət {_m(ebay_price)} · qalıq {ebay_qty}")
 
             # --- Hesablama ---
             amazon_old = row["amazon_old"]
@@ -143,7 +149,7 @@ def run(health_report: bool = False) -> int:
             m_usd, m_pct = pricing.margin(ebay_price, amazon_new)
             suggested = pricing.suggest_ebay_price(ebay_price, amazon_old, amazon_new)
             status, should_alert = pricing.classify(
-                ebay_price, amazon_old, amazon_new, data.in_stock, m_pct
+                ebay_price, amazon_old, amazon_new, data.in_stock, m_pct, ebay_qty
             )
 
             print(
@@ -155,6 +161,7 @@ def run(health_report: bool = False) -> int:
                 "row": row["row"],
                 "product_name": data.name or row["product_name"],
                 "ebay_price": ebay_price,
+                "ebay_qty": ebay_qty,
                 "amazon_old": amazon_old,
                 "amazon_new": amazon_new,
                 "stock": data.stock,
@@ -219,6 +226,7 @@ def _base(row):
         "row": row["row"],
         "product_name": row["product_name"],
         "ebay_price": row["ebay_price"],
+        "ebay_qty": row.get("ebay_qty"),
         "amazon_old": row["amazon_old"],
         "amazon_new": None,
         "stock": "",

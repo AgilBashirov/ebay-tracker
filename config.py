@@ -19,17 +19,18 @@ COL = {
     "amazon_link":    2,   # B
     "product_name":   3,   # C
     "ebay_price":     4,   # D  <- sizin eBay satış qiymətiniz
-    "amazon_old":     5,   # E
-    "amazon_new":     6,   # F
-    "stock":          7,   # G
-    "margin_usd":     8,   # H
-    "margin_pct":     9,   # I
-    "suggested_ebay": 10,  # J
-    "last_check":     11,  # K
-    "status":         12,  # L
+    "ebay_qty":       5,   # E  <- eBay listinginizdəki qalıq say
+    "amazon_old":     6,   # F
+    "amazon_new":     7,   # G
+    "stock":          8,   # H
+    "margin_usd":     9,   # I
+    "margin_pct":    10,   # J
+    "suggested_ebay": 11,  # K
+    "last_check":    12,   # L
+    "status":        13,   # M
 }
 HEADERS = [
-    "eBay Link", "Amazon Link", "Məhsul Adı", "eBay Qiymətim",
+    "eBay Link", "Amazon Link", "Məhsul Adı", "eBay Qiymətim", "eBay Say",
     "Amazon (əvvəlki)", "Amazon (indiki)", "Stok",
     "Marja $", "Marja %", "Tövsiyə eBay", "Son Yoxlama", "Status",
 ]

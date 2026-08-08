@@ -78,12 +78,27 @@ def classify(
     amazon_new: float | None,
     in_stock: bool,
     margin_pct: float | None,
+    ebay_qty: int | None = None,
 ) -> tuple[str, bool]:
     """
     (status_etiketi, bildiriş_lazımdır) qaytarır.
+
+    eBay qalıq sayı nəzərə alınır:
+      eBay 0  + Amazon yoxdur -> bildiriş YOX (listing artıq bağlıdır, tədbir lazım deyil)
+      eBay 0  + Amazon var    -> bildiriş VAR (yenidən satışa çıxarmaq imkanı)
+      eBay >0 + Amazon yoxdur -> bildiriş VAR (təcili: listingi dayandırın)
     """
+    ebay_closed = ebay_qty is not None and ebay_qty <= 0
+
     if not in_stock:
+        if ebay_closed:
+            # Listing onsuz da bağlıdır — narahat etməyə ehtiyac yoxdur.
+            return "STOK YOX (eBay bağlı)", False
         return "STOK YOX", config.ALERT_ON_OUT_OF_STOCK
+
+    # Amazon-da var, sizin listing bağlıdır → satış imkanı
+    if ebay_closed:
+        return "TEKRAR AC", True
 
     # Qiymət oxuna bilməyibsə bu stok problemi deyil — səhv bildiriş göndərməyək.
     if amazon_new is None:

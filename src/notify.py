@@ -84,7 +84,23 @@ def format_alerts(alerts: list[dict]) -> str:
         if a["status"].startswith("STOK YOX"):
             lines.append("🔴 <b>Amazon-da STOK BİTİB</b>")
             lines.append(f"   Stok: {_e(a.get('stock'))}")
+            qty = a.get("ebay_qty")
+            if qty:
+                lines.append(f"   ⚠️ eBay-də hələ <b>{qty}</b> ədəd satışdadır")
             lines.append("   💡 eBay listingini dayandırın və ya başqa təchizatçı tapın")
+
+        elif a["status"].startswith("TEKRAR AC"):
+            lines.append("🟢 <b>Amazon-da yenidən STOKDADIR</b>")
+            lines.append("   eBay listinginiz bağlıdır (say: 0)")
+            if a.get("amazon_new") is not None:
+                lines.append(f"   Amazon qiyməti: <b>{_money(a['amazon_new'])}</b>")
+            m_usd, m_pct = a.get("margin_usd"), a.get("margin_pct")
+            if m_usd is not None:
+                lines.append(f"   Gözlənilən marja: {_money(m_usd)} ({m_pct:.1f}%)")
+            sug = a.get("suggested_ebay")
+            if sug is not None:
+                lines.append(f"   💡 <b>Listingi yenidən açın</b> — qiymət: {_money(sug)}")
+
         else:
             old, new = a.get("amazon_old"), a.get("amazon_new")
             if old is not None and new is not None:
