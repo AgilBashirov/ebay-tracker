@@ -74,8 +74,33 @@ PRICE_ROUNDING = os.environ.get("PRICE_ROUNDING", "99")
 # ---------------------------------------------------------------------------
 # SCRAPING TEMPİ (bloklamaya qarşı ən vacib parametrlər)
 # ---------------------------------------------------------------------------
-# Hər işləmədə maksimum neçə məhsul yoxlanılsın.
-BATCH_SIZE = int(os.environ.get("BATCH_SIZE", "25"))
+# Hər işləmədə neçə məhsul yoxlanılsın.
+# "auto" (defolt) = sistem özü hesablayır: hər məhsul gündə ~1 dəfə yoxlansın deyə
+#   batch = məhsul_sayı / 24 (saatlıq işləmə), 5-60 arasında saxlanılır.
+# Məhsul sayı artdıqca özü uyğunlaşır — heç nə dəyişdirmək lazım deyil.
+# İstəsəniz rəqəm yaza bilərsiniz (məs. "30"), amma adətən ehtiyac yoxdur.
+BATCH_SIZE = os.environ.get("BATCH_SIZE", "auto").strip().lower()
+
+# "auto" rejimində hədlər
+AUTO_BATCH_MIN = int(os.environ.get("AUTO_BATCH_MIN", "3"))
+AUTO_BATCH_MAX = int(os.environ.get("AUTO_BATCH_MAX", "60"))
+RUNS_PER_DAY = int(os.environ.get("RUNS_PER_DAY", "24"))  # cron saatlıq işləyir
+
+
+def resolve_batch_size(total_products: int) -> int:
+    """Məhsul sayına görə bu işləmədə neçə məhsul yoxlanacağını qaytarır."""
+    import math
+
+    if BATCH_SIZE != "auto":
+        try:
+            return max(1, int(BATCH_SIZE))
+        except ValueError:
+            pass  # səhv dəyər yazılıbsa auto-ya keç
+
+    if total_products <= 0:
+        return AUTO_BATCH_MIN
+    per_run = math.ceil(total_products / RUNS_PER_DAY)
+    return max(AUTO_BATCH_MIN, min(AUTO_BATCH_MAX, per_run))
 
 # Məhsullar arası təsadüfi gecikmə (saniyə). Aşağı salmayın — bloklamanın əsas səbəbi budur.
 DELAY_MIN_SEC = int(os.environ.get("DELAY_MIN_SEC", "8"))

@@ -32,7 +32,12 @@ def run(health_report: bool = False) -> int:
     all_rows = sheets.read_rows(ws)
     print(f"Sheet-də cəmi {len(all_rows)} məhsul var.")
 
-    batch = sheets.pick_batch(all_rows, config.BATCH_SIZE)
+    batch_size = config.resolve_batch_size(len(all_rows))
+    mode = "avtomatik" if config.BATCH_SIZE == "auto" else "əl ilə təyin edilmiş"
+    print(f"Batch ölçüsü ({mode}): {batch_size} məhsul/işləmə "
+          f"→ gündəlik tutum {batch_size * config.RUNS_PER_DAY}")
+
+    batch = sheets.pick_batch(all_rows, batch_size)
     print(f"Bu işləmədə yoxlanacaq: {len(batch)} məhsul.\n")
 
     if not batch:

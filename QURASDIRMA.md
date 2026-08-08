@@ -9,14 +9,28 @@ Amazon qiymətlərini avtomatik izləyir, marjanızı hesablayır və dəyişikl
 Hər saat GitHub-un serverində işə düşür və:
 
 1. Google Sheet-dəki bütün məhsulları oxuyur (54 də olsa, 500 də — sətir sayı dinamikdir)
-2. Ən köhnə yoxlanılan 25 məhsulu seçir
+2. Neçə məhsul yoxlayacağını **özü hesablayır** və ən köhnə yoxlanılanları seçir
 3. Amazon-dan qiymət və stok statusunu oxuyur
 4. eBay listinginizdən satış qiymətinizi oxuyur
 5. Marjanızı hesablayır və lazım olsa yeni eBay qiyməti təklif edir
 6. Sheet-i yeniləyir və rəngləyir
 7. **Yalnız dəyişiklik varsa** Telegram-a bildiriş göndərir
 
-Gündə 24 işləmə × 25 məhsul = **600 məhsul tutumu**. 500 məhsula qədər rahat çatır.
+### Batch ölçüsü özü tənzimlənir
+
+Hər işləmədə neçə məhsul yoxlanacağını sistem **məhsul sayına görə özü hesablayır** — siz heç nə etməli deyilsiniz. Yeni məhsul əlavə etdikcə avtomatik uyğunlaşır:
+
+| Məhsul sayı | İşləmədə | Gündəlik tutum | Hər məhsul gündə |
+|---|---|---|---|
+| 54 | 3 | 72 | 1.3 dəfə |
+| 100 | 5 | 120 | 1.2 dəfə |
+| 300 | 13 | 312 | 1.0 dəfə |
+| 500 | 21 | 504 | 1.0 dəfə |
+| 1000 | 42 | 1008 | 1.0 dəfə |
+
+Məntiq: hər məhsul gündə təxminən **bir dəfə** yoxlanılsın. Bu, həm kifayət qədər tez-tezdir, həm də Amazon-a lazımsız sorğu getmədiyi üçün bloklama riskini minimuma endirir.
+
+`Run workflow` düyməsindəki sahə **boş/`auto` qalsa** avtomatik hesablanır. Ora rəqəm yazmaq yalnız test məqsədilə lazımdır (məs. `3` yazıb tez yoxlamaq üçün).
 
 ---
 
@@ -136,7 +150,7 @@ Repo → **Settings** → **Secrets and variables** → **Actions** → **Variab
 
 | Dəyişən | Defolt | İzah |
 |---|---|---|
-| `BATCH_SIZE` | 25 | Hər işləmədə neçə məhsul |
+| `BATCH_SIZE` | auto | Hər işləmədə neçə məhsul — **toxunmayın**, özü hesablayır |
 | `MARGIN_ALERT_PCT` | 15 | Marja bu %-in altına düşəndə xəbərdarlıq |
 | `PRICE_RISE_MIN_USD` | 0.50 | Bu qədər $ artımdan sonra bildiriş |
 | `PRICE_RISE_MIN_PCT` | 2.0 | Bu qədər % artımdan sonra bildiriş |
@@ -152,11 +166,9 @@ Repo → **Settings** → **Secrets and variables** → **Actions** → **Variab
 
 | Məhsul sayı | Nə etməli |
 |---|---|
-| 54 (indiki) | Heç nə — defolt ayarlar bəsdir |
-| 150-yə qədər | Heç nə |
-| 200-300 | `BATCH_SIZE` = 30 edin |
-| 400-500 | `BATCH_SIZE` = 35 edin **və** ehtiyat API açarlarını (Addım 4) əlavə edin |
-| 500+ | Bloklama tezləşəcək — ya ödənişli API-yə (~$20/ay), ya da Oracle Cloud pulsuz VM-ə keçmək lazımdır. Kod hər ikisinə hazırdır, yalnız konfiqurasiya dəyişikliyidir |
+| 54 → 300 | **Heç nə.** Sadəcə sheet-ə yeni sətir əlavə edin, sistem özü uyğunlaşır |
+| 300-500 | Heç nə. İstəsəniz ehtiyat API açarlarını (Addım 4) əlavə edin |
+| 500+ | Bloklama tezləşə bilər — ya ödənişli API-yə (~$20/ay), ya da Oracle Cloud pulsuz VM-ə keçmək lazımdır. Kod hər ikisinə hazırdır, yalnız konfiqurasiya dəyişikliyidir |
 
 ---
 

@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       batch_size:
-        description: "Bu işləmədə neçə məhsul yoxlansın"
+        description: "Bu işləmədə neçə məhsul yoxlansın (boş buraxın = avtomatik)"
         required: false
-        default: "25"
+        default: "auto"
 
 concurrency:
   group: tracker
@@ -41,7 +41,7 @@ jobs:
           SHEET_ID: ${{ secrets.SHEET_ID }}
           SCRAPERAPI_KEY: ${{ secrets.SCRAPERAPI_KEY }}
           SCRAPINGBEE_KEY: ${{ secrets.SCRAPINGBEE_KEY }}
-          BATCH_SIZE: ${{ github.event.inputs.batch_size || vars.BATCH_SIZE || '25' }}
+          BATCH_SIZE: ${{ github.event.inputs.batch_size || vars.BATCH_SIZE || 'auto' }}
           MARGIN_ALERT_PCT: ${{ vars.MARGIN_ALERT_PCT || '15' }}
           PRICE_RISE_MIN_USD: ${{ vars.PRICE_RISE_MIN_USD || '0.50' }}
           PRICE_RISE_MIN_PCT: ${{ vars.PRICE_RISE_MIN_PCT || '2.0' }}
