@@ -51,7 +51,7 @@ jobs:
           ALERT_ON_PRICE_DROP: ${{ vars.ALERT_ON_PRICE_DROP || '0' }}
           DELAY_MIN_SEC: ${{ vars.DELAY_MIN_SEC || '8' }}
           DELAY_MAX_SEC: ${{ vars.DELAY_MAX_SEC || '22' }}
-          PYTHONPATH: src
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/src
         run: python src/main.py
 
   # Günün sonunda qısa sağlamlıq hesabatı
@@ -80,5 +80,5 @@ jobs:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           SHEET_ID: ${{ secrets.SHEET_ID }}
-          PYTHONPATH: src
+          PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/src
         run: python src/report.py
