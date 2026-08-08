@@ -275,22 +275,42 @@ EBAY_PRICE_PATTERNS = [
 ]
 
 
-def scrape_ebay_price(browser: Browser, url: str) -> float | None:
-    if not url:
+def _parse_ebay_price(html: str) -> float | None:
+    for pat in EBAY_PRICE_PATTERNS:
+        m = re.search(pat, html, re.S | re.I)
+        if m:
+            try:
+                value = float(m.group(1).replace(",", ""))
+                if value > 0:
+                    return value
+            except ValueError:
+                continue
+    return None
+
+
+def scrape_ebay_price(browser: Browser, url: str, api_mode: bool = False) -> float | None:
+    """
+    eBay listinginizin qiymətini oxuyur.
+    Birbaşa alınmasa (eBay də bot qorumasına malikdir) API kanalına keçir.
+    """
+    if not url or not url.startswith("http"):
         return None
-    try:
-        html, status = browser.fetch_html(url)
-        if status >= 400:
-            return None
-        for pat in EBAY_PRICE_PATTERNS:
-            m = re.search(pat, html, re.S | re.I)
-            if m:
-                try:
-                    return float(m.group(1).replace(",", ""))
-                except ValueError:
-                    continue
-    except Exception:
-        return None
+
+    if not api_mode:
+        try:
+            html, status = browser.fetch_html(url)
+            if status < 400:
+                price = _parse_ebay_price(html)
+                if price is not None:
+                    return price
+        except Exception:
+            pass
+
+    # Birbaşa alınmadı → API kanalı
+    if config.has_api_fallback():
+        html = fetch_via_fallback(url)
+        if html:
+            return _parse_ebay_price(html)
     return None
 
 

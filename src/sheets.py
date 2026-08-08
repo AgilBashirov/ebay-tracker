@@ -37,16 +37,127 @@ def open_sheet():
 # ---------------------------------------------------------------------------
 
 def ensure_structure(ws):
-    """Başlıqları yoxlayır/qoyur və sütun formatını tənzimləyir. Bir dəfə işləyir."""
+    """Başlıqları qoyur və bütün cədvəl görünüşünü tənzimləyir."""
     current = ws.row_values(1)
     if current[: len(config.HEADERS)] != config.HEADERS:
         ws.update(
             values=[config.HEADERS],
             range_name=f"A1:{_col_letter(len(config.HEADERS))}1",
         )
-        _format_header(ws)
-        _set_column_widths(ws)
+    apply_layout(ws)
     return True
+
+
+def apply_layout(ws):
+    """
+    Cədvəlin bütün görünüşünü qurur:
+      - başlıq sətri (tünd fon, ağ qalın mətn, dondurulmuş)
+      - sütun enləri
+      - mətn daşmasının qarşısı (CLIP) — uzun URL-lər yan xanalara girmir
+      - rəqəm sütunları sağa, status/tarix mərkəzə düzülür
+    """
+    last_col = len(config.HEADERS)
+    sheet_id = ws.id
+    reqs = []
+
+    # ---- Başlıq ----
+    reqs.append({
+        "repeatCell": {
+            "range": {"sheetId": sheet_id, "startRowIndex": 0, "endRowIndex": 1,
+                      "startColumnIndex": 0, "endColumnIndex": last_col},
+            "cell": {"userEnteredFormat": {
+                "backgroundColor": {"red": 0.15, "green": 0.24, "blue": 0.36},
+                "textFormat": {"bold": True, "fontSize": 10,
+                               "foregroundColor": {"red": 1, "green": 1, "blue": 1}},
+                "horizontalAlignment": "CENTER",
+                "verticalAlignment": "MIDDLE",
+                "wrapStrategy": "WRAP",
+            }},
+            "fields": ("userEnteredFormat(backgroundColor,textFormat,"
+                       "horizontalAlignment,verticalAlignment,wrapStrategy)"),
+        }
+    })
+
+    # ---- Başlığı dondur ----
+    reqs.append({
+        "updateSheetProperties": {
+            "properties": {"sheetId": sheet_id,
+                           "gridProperties": {"frozenRowCount": 1}},
+            "fields": "gridProperties.frozenRowCount",
+        }
+    })
+
+    # ---- Sütun enləri ----
+    widths = {
+        1: 150,   # A eBay Link
+        2: 150,   # B Amazon Link
+        3: 300,   # C Məhsul Adı
+        4: 95,    # D eBay Qiymətim
+        5: 100,   # E Amazon (əvvəlki)
+        6: 100,   # F Amazon (indiki)
+        7: 145,   # G Stok
+        8: 85,    # H Marja $
+        9: 80,    # I Marja %
+        10: 105,  # J Tövsiyə eBay
+        11: 120,  # K Son Yoxlama
+        12: 125,  # L Status
+    }
+    for col, px in widths.items():
+        reqs.append({
+            "updateDimensionProperties": {
+                "range": {"sheetId": sheet_id, "dimension": "COLUMNS",
+                          "startIndex": col - 1, "endIndex": col},
+                "properties": {"pixelSize": px},
+                "fields": "pixelSize",
+            }
+        })
+
+    # ---- Məlumat sahəsi: daşma yoxdur, kiçik şrift ----
+    reqs.append({
+        "repeatCell": {
+            "range": {"sheetId": sheet_id, "startRowIndex": 1,
+                      "startColumnIndex": 0, "endColumnIndex": last_col},
+            "cell": {"userEnteredFormat": {
+                "wrapStrategy": "CLIP",
+                "verticalAlignment": "MIDDLE",
+                "textFormat": {"fontSize": 10},
+            }},
+            "fields": "userEnteredFormat(wrapStrategy,verticalAlignment,textFormat)",
+        }
+    })
+
+    # ---- Sütun düzülüşü ----
+    def align(start_col, end_col, how):
+        reqs.append({
+            "repeatCell": {
+                "range": {"sheetId": sheet_id, "startRowIndex": 1,
+                          "startColumnIndex": start_col - 1, "endColumnIndex": end_col},
+                "cell": {"userEnteredFormat": {"horizontalAlignment": how}},
+                "fields": "userEnteredFormat.horizontalAlignment",
+            }
+        })
+
+    align(1, 3, "LEFT")     # linklər + ad
+    align(4, 6, "RIGHT")    # qiymətlər
+    align(7, 7, "LEFT")     # stok mətni
+    align(8, 10, "RIGHT")   # marja + təklif
+    align(11, 12, "CENTER")  # tarix + status
+
+    # ---- Status sütunu qalın ----
+    reqs.append({
+        "repeatCell": {
+            "range": {"sheetId": sheet_id, "startRowIndex": 1,
+                      "startColumnIndex": 11, "endColumnIndex": 12},
+            "cell": {"userEnteredFormat": {
+                "textFormat": {"fontSize": 10, "bold": True}}},
+            "fields": "userEnteredFormat.textFormat",
+        }
+    })
+
+    try:
+        ws.spreadsheet.batch_update({"requests": reqs})
+    except Exception as e:
+        print(f"[sheets] Format tətbiq edilə bilmədi: {e}")
 
 
 def _col_letter(idx: int) -> str:
@@ -55,65 +166,6 @@ def _col_letter(idx: int) -> str:
         idx, rem = divmod(idx - 1, 26)
         letters = chr(65 + rem) + letters
     return letters
-
-
-def _format_header(ws):
-    ws.format(
-        f"A1:{_col_letter(len(config.HEADERS))}1",
-        {
-            "backgroundColor": {"red": 0.15, "green": 0.24, "blue": 0.36},
-            "textFormat": {
-                "bold": True,
-                "fontSize": 10,
-                "foregroundColor": {"red": 1, "green": 1, "blue": 1},
-            },
-            "horizontalAlignment": "CENTER",
-            "verticalAlignment": "MIDDLE",
-            "wrapStrategy": "WRAP",
-        },
-    )
-    try:
-        ws.freeze(rows=1)
-    except Exception:
-        pass
-
-
-def _set_column_widths(ws):
-    """Sütun enləri — linklər dar, məlumat sütunları oxunaqlı."""
-    widths = {
-        1: 170,   # eBay Link
-        2: 170,   # Amazon Link
-        3: 320,   # Məhsul Adı
-        4: 100,   # eBay Qiymətim
-        5: 110,   # Amazon əvvəlki
-        6: 110,   # Amazon indiki
-        7: 150,   # Stok
-        8: 85,    # Marja $
-        9: 85,    # Marja %
-        10: 110,  # Tövsiyə eBay
-        11: 110,  # Son Yoxlama
-        12: 130,  # Status
-    }
-    sheet_id = ws.id
-    requests = [
-        {
-            "updateDimensionProperties": {
-                "range": {
-                    "sheetId": sheet_id,
-                    "dimension": "COLUMNS",
-                    "startIndex": col - 1,
-                    "endIndex": col,
-                },
-                "properties": {"pixelSize": px},
-                "fields": "pixelSize",
-            }
-        }
-        for col, px in widths.items()
-    ]
-    try:
-        ws.spreadsheet.batch_update({"requests": requests})
-    except Exception:
-        pass
 
 
 # ---------------------------------------------------------------------------
@@ -239,16 +291,18 @@ def _fmt_pct(v):
 def _apply_row_colors(ws, results):
     """Status sütununa görə sətiri rəngləyir — vizual olaraq dərhal görünsün."""
     palette = {
-        "OK":        {"red": 0.85, "green": 0.94, "blue": 0.83},  # yaşıl
-        "QIYMET+":   {"red": 1.00, "green": 0.90, "blue": 0.80},  # narıncı
-        "AZ MARJA":  {"red": 1.00, "green": 0.95, "blue": 0.75},  # sarı
-        "STOK YOX":  {"red": 0.99, "green": 0.80, "blue": 0.80},  # qırmızı
-        "XETA":      {"red": 0.90, "green": 0.90, "blue": 0.90},  # boz
-        "BLOKLANDI": {"red": 0.85, "green": 0.82, "blue": 0.95},  # bənövşəyi
+        "OK":        {"red": 0.91, "green": 0.96, "blue": 0.91},  # açıq yaşıl
+        "QIYMET+":   {"red": 1.00, "green": 0.92, "blue": 0.83},  # narıncı
+        "QIYMET-":   {"red": 0.89, "green": 0.95, "blue": 1.00},  # mavi
+        "AZ":        {"red": 1.00, "green": 0.97, "blue": 0.80},  # sarı (AZ MARJA)
+        "STOK":      {"red": 0.99, "green": 0.85, "blue": 0.85},  # qırmızı (STOK YOX)
+        "XETA":      {"red": 0.93, "green": 0.93, "blue": 0.93},  # boz
+        "BLOKLANDI": {"red": 0.91, "green": 0.89, "blue": 0.98},  # bənövşəyi
     }
     requests = []
     for r in results:
-        key = r.get("status", "OK").split()[0] if r.get("status") else "OK"
+        status = r.get("status") or "OK"
+        key = status.split()[0]
         color = palette.get(key, palette["OK"])
         requests.append(
             {

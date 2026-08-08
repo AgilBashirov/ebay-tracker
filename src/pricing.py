@@ -59,12 +59,17 @@ def suggest_ebay_price(
 
 
 def _round_price(value: float) -> float:
-    if config.PRICE_ROUNDING == "99":
-        # Yuxarı yuvarlaqlaşdır, sonra .99 et: 21.30 -> 21.99
-        return math.floor(value) + 0.99 if value % 1 <= 0.99 else math.ceil(value) + 0.99
-    if config.PRICE_ROUNDING == "none":
+    """
+    Qiyməti .99 ilə bitən ən yaxın (aşağı olmayan) dəyərə yuvarlaqlaşdırır.
+    Sentlə işləyirik — float müqayisəsi 32.99 % 1 = 0.990000000000002 kimi
+    xətalar verir və qiyməti səhvən bir dollar yuxarı qaldırırdı.
+    """
+    if config.PRICE_ROUNDING != "99":
         return round(value, 2)
-    return round(value, 2)
+
+    cents = round(value * 100)
+    target = math.ceil((cents - 99) / 100) * 100 + 99
+    return target / 100
 
 
 def classify(

@@ -124,11 +124,17 @@ def run(health_report: bool = False) -> int:
             # --- eBay qiyməti ---
             ebay_price = row["ebay_price"]
             if config.EBAY_PRICE_SOURCE == "scrape" and sheets.needs_ebay_refresh(row):
-                scraper.polite_delay()
-                fetched = scraper.scrape_ebay_price(browser, row["ebay_link"])
+                if not api_mode:
+                    scraper.polite_delay()
+                fetched = scraper.scrape_ebay_price(
+                    browser, row["ebay_link"], api_mode=api_mode
+                )
                 if fetched:
                     ebay_price = fetched
                     print(f"    eBay qiyməti oxundu: ${fetched:,.2f}")
+                else:
+                    print("    ⚠️  eBay qiyməti oxuna bilmədi "
+                          "(D sütununu əl ilə doldura bilərsiniz)")
 
             # --- Hesablama ---
             amazon_old = row["amazon_old"]
