@@ -80,6 +80,10 @@ def classify(
     if not in_stock:
         return "STOK YOX", config.ALERT_ON_OUT_OF_STOCK
 
+    # Qiymət oxuna bilməyibsə bu stok problemi deyil — səhv bildiriş göndərməyək.
+    if amazon_new is None:
+        return "XETA qiymət oxunmadı", False
+
     if amazon_old is not None and amazon_new is not None:
         diff = amazon_new - amazon_old
         pct = (diff / amazon_old * 100) if amazon_old else 0

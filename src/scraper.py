@@ -207,19 +207,38 @@ def parse_amazon(html: str) -> ScrapeResult:
             res.stock = _clean(m.group(1))[:80]
             break
 
+    # ---- Stok qərarı ----
+    # VACİB: OOS markerlərini YALNIZ #availability mətnində axtarırıq.
+    # Bütün HTML-də axtarmaq yanlış nəticə verir, çünki "out of stock" ifadəsi
+    # digər variantlarda, oxşar məhsullarda və rəylərdə də keçir.
     stock_low = res.stock.lower()
-    if any(x in stock_low for x in OOS_MARKERS) or any(x in low for x in OOS_MARKERS):
+
+    if any(x in stock_low for x in OOS_MARKERS):
         res.in_stock = False
         if not res.stock:
             res.stock = "Currently unavailable"
-    elif res.price is None:
-        # Qiymət yoxdursa və stok mesajı da yoxdursa — çox güman satışda deyil
-        res.in_stock = False
-        res.stock = res.stock or "Qiymət tapılmadı"
-    else:
+
+    elif res.price is not None:
+        # Qiymət var → satışdadır
         res.in_stock = True
         if not res.stock:
             res.stock = "In Stock"
+
+    else:
+        # Qiymət yoxdur və availability də aydın deyil.
+        # Yalnız bu halda səhifədə açıq-aydın "əlçatmaz" siqnalı axtarırıq.
+        hard_oos = ("currently unavailable", "temporarily out of stock",
+                    "we don't know when or if this item will be back")
+        if any(x in low for x in hard_oos):
+            res.in_stock = False
+            res.stock = res.stock or "Currently unavailable"
+        else:
+            # Nə qiymət, nə aydın stok mesajı → bu, stok problemi deyil,
+            # oxuma problemidir. Səhv "stok bitdi" bildirişi göndərməyək.
+            res.in_stock = True
+            res.price = None
+            res.stock = res.stock or "Qiymət oxuna bilmədi"
+            res.notes.append("price_missing")
 
     return res
 

@@ -126,17 +126,26 @@ def format_alerts(alerts: list[dict]) -> str:
     return "\n".join(lines).strip()
 
 
-def format_blocked(checked: int, remaining: int, reason: str) -> str:
+def format_blocked(checked: int, remaining: int, reason: str, lost: int = 0) -> str:
+    # Ehtiyat kanal hər şeyi əhatə edibsə — bu problem deyil, sadəcə məlumatdır.
+    if lost == 0 and config.has_api_fallback():
+        return (
+            "<b>ℹ️ Məlumat: API kanalı istifadə olundu</b>\n\n"
+            f"Amazon birbaşa girişi blokladı, yoxlama API üzərindən tamamlandı.\n"
+            f"Yoxlanılan məhsul: <b>{checked}</b> · İtirilən: <b>0</b>\n\n"
+            "<i>Hər şey qaydasındadır, tədbir tələb olunmur.</i>"
+        )
+
     base = (
         "<b>🛑 Amazon bloklaması aşkarlandı</b>\n\n"
         f"Səbəb: <code>{_e(reason)}</code>\n"
-        f"Bu işləmədə yoxlanıldı: <b>{checked}</b> məhsul\n"
-        f"Növbəyə qaldı: <b>{remaining}</b> məhsul\n\n"
+        f"Yoxlanıldı: <b>{checked}</b> · Oxuna bilmədi: <b>{lost}</b> · "
+        f"Növbəyə qaldı: <b>{remaining}</b>\n\n"
     )
     if config.has_api_fallback():
         return base + (
-            "Ehtiyat API kanalı işə düşdü. Qalan məhsullar oradan oxunur — "
-            "heç nə itmir."
+            "Ehtiyat API kanalı da cavab vermədi — kredit bitmiş ola bilər. "
+            "Provayder panelində qalan kredite baxın."
         )
     return base + (
         "⚠️ <b>Ehtiyat API açarı təyin edilməyib.</b>\n"

@@ -191,7 +191,13 @@ def run(health_report: bool = False) -> int:
 
     if block_reason:
         remaining = len(batch) - processed
-        notify.send(notify.format_blocked(processed, remaining, block_reason))
+        lost = sum(1 for r in results if r.get("status") == "BLOKLANDI")
+        # Ehtiyat kanal hər şeyi əhatə edibsə, səssiz məlumat mesajı göndəririk —
+        # hər işləmədə həyəcanlı bildiriş gəlməsin.
+        notify.send(
+            notify.format_blocked(processed, remaining, block_reason, lost),
+            silent=(lost == 0),
+        )
 
     if health_report:
         notify.send(notify.format_health(stats), silent=True)
