@@ -51,6 +51,15 @@ def run(health_report: bool = False) -> int:
     block_reason = None
     processed = 0
 
+    # API rejimi: birbaşa Amazon-a dəymirik.
+    # "api" seçilibsə əvvəldən, "auto"da isə ilk bloklamadan sonra aktivləşir.
+    api_mode = config.SCRAPE_METHOD == "api"
+    if api_mode and not config.has_api_fallback():
+        print("⚠️  SCRAPE_METHOD=api seçilib, amma API açarı yoxdur — birbaşa rejimə keçilir.")
+        api_mode = False
+    if api_mode:
+        print("🔑 API rejimi aktivdir — Amazon-a birbaşa sorğu getməyəcək.\n")
+
     with scraper.Browser() as browser:
         for idx, row in enumerate(batch, start=1):
             label = (row["product_name"] or row["amazon_link"])[:60]
@@ -63,27 +72,32 @@ def run(health_report: bool = False) -> int:
 
             # --- Amazon ---
             try:
-                data = scraper.scrape_amazon(browser, row["amazon_link"])
+                if api_mode:
+                    data = scraper.scrape_amazon_via_api(row["amazon_link"])
+                else:
+                    data = scraper.scrape_amazon(browser, row["amazon_link"])
                 consecutive_blocks = 0
 
             except scraper.BlockedError as e:
-                consecutive_blocks += 1
                 stats["blocked"] += 1
                 block_reason = str(e)
                 print(f"    🛑 BLOKLAMA: {e}")
 
-                html_fb = scraper.fetch_via_fallback(row["amazon_link"])
-                if html_fb:
+                data = None
+                if config.has_api_fallback():
+                    # Bu IP bloklanıb — qalan bütün məhsullar üçün API-yə keçirik,
+                    # boş yerə Amazon-a dəyməyək.
+                    if not api_mode:
+                        api_mode = True
+                        print("    🔑 Qalan məhsullar API üzərindən oxunacaq.")
                     try:
-                        data = scraper.parse_amazon(html_fb)
+                        data = scraper.scrape_amazon_via_api(row["amazon_link"])
                         consecutive_blocks = 0
-                        print("    ↩️  Ehtiyat kanal işlədi.")
-                    except Exception:
-                        data = None
-                else:
-                    data = None
+                    except Exception as fe:
+                        print(f"    ❌ API də alınmadı: {fe}")
 
                 if data is None:
+                    consecutive_blocks += 1
                     results.append({**_base(row), "status": "BLOKLANDI"})
                     if consecutive_blocks >= config.BLOCK_ABORT_THRESHOLD:
                         print("\n🛑 Ardıcıl bloklama həddi keçildi — işləmə dayandırılır.")

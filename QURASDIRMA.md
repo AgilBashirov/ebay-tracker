@@ -95,12 +95,21 @@ Bunları bir-bir əlavə edin:
 | `TELEGRAM_CHAT_ID` | 3-cü addımda tapdığınız rəqəm |
 | `SHEET_ID` | `1h5DJGfwCYPSUyMhzMcxHC-5NJQhnS8qXPVD_nfOF7tE` |
 
-**İxtiyari** (bloklama ehtiyatı üçün — sonra da əlavə edə bilərsiniz):
+**⚠️ MƏCBURİ — GitHub Actions üçün:**
 
-| Secret adı | Haradan |
-|---|---|
-| `SCRAPERAPI_KEY` | scraperapi.com — aylıq 1000 pulsuz kredit |
-| `SCRAPINGBEE_KEY` | scrapingbee.com — aylıq 1000 pulsuz kredit |
+Amazon GitHub-un server IP-lərini bloklayır (ilk sorğudan). Ona görə ən azı bir scraping API açarı lazımdır. Bunlar rezident proksi istifadə edirlər, Amazon bloklamır:
+
+| Secret adı | Haradan | Pulsuz limit |
+|---|---|---|
+| `SCRAPERAPI_KEY` | scraperapi.com → qeydiyyat → Dashboard-da API Key | 1,000 kredit/ay |
+| `SCRAPINGBEE_KEY` | scrapingbee.com → qeydiyyat → Dashboard-da API Key | 1,000 kredit/ay |
+
+**İkisini də əlavə edin** — birincinin krediti bitəndə sistem avtomatik ikinciyə keçir. Cəmi 2,000 kredit/ay.
+
+Kredit hesabı: hər məhsul gündə 1 dəfə yoxlanır.
+- 54 məhsul → ayda ~1,620 kredit ✅ pulsuz limitə sığır
+- 65 məhsul → ayda ~1,950 kredit ⚠️ limitin sərhədində
+- 100+ məhsul → pulsuz limit çatmır, ödənişli plan lazımdır (~$30-50/ay)
 
 ### Addım 5 — İlk işləmə
 

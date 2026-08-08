@@ -126,8 +126,18 @@ EBAY_PRICE_SOURCE = os.environ.get("EBAY_PRICE_SOURCE", "scrape")
 EBAY_REFRESH_DAYS = int(os.environ.get("EBAY_REFRESH_DAYS", "7"))
 
 # ---------------------------------------------------------------------------
-# EHTİYAT KANAL (bloklama olduqda)
+# AMAZON-A GİRİŞ ÜSULU
 # ---------------------------------------------------------------------------
-# Pulsuz kredit verən scraping API-ləri. Açar yoxdursa avtomatik ötürülür.
+# "auto"   -> əvvəlcə birbaşa cəhd et, bloklama olsa API-yə keç (defolt)
+# "api"    -> həmişə API üzərindən (GitHub Actions üçün ən etibarlısı)
+# "direct" -> yalnız birbaşa (öz kompüterinizdə / rezident IP-də)
+SCRAPE_METHOD = os.environ.get("SCRAPE_METHOD", "auto").strip().lower()
+
+# Pulsuz kredit verən scraping API-ləri (rezident proksi ilə işləyirlər).
+# Açar yoxdursa avtomatik ötürülür.
 SCRAPERAPI_KEY = os.environ.get("SCRAPERAPI_KEY", "")
 SCRAPINGBEE_KEY = os.environ.get("SCRAPINGBEE_KEY", "")
+
+
+def has_api_fallback() -> bool:
+    return bool(SCRAPERAPI_KEY or SCRAPINGBEE_KEY)

@@ -127,14 +127,22 @@ def format_alerts(alerts: list[dict]) -> str:
 
 
 def format_blocked(checked: int, remaining: int, reason: str) -> str:
-    return (
+    base = (
         "<b>🛑 Amazon bloklaması aşkarlandı</b>\n\n"
         f"Səbəb: <code>{_e(reason)}</code>\n"
         f"Bu işləmədə yoxlanıldı: <b>{checked}</b> məhsul\n"
         f"Növbəyə qaldı: <b>{remaining}</b> məhsul\n\n"
-        "İşləmə IP-ni qorumaq üçün dayandırıldı. "
-        "Qalan məhsullar növbəti saatda (yeni server IP-si ilə) "
-        "avtomatik yoxlanacaq — heç nə itmir."
+    )
+    if config.has_api_fallback():
+        return base + (
+            "Ehtiyat API kanalı işə düşdü. Qalan məhsullar oradan oxunur — "
+            "heç nə itmir."
+        )
+    return base + (
+        "⚠️ <b>Ehtiyat API açarı təyin edilməyib.</b>\n"
+        "GitHub server IP-lərini Amazon bloklayır. Həll üçün "
+        "<code>SCRAPERAPI_KEY</code> və/və ya <code>SCRAPINGBEE_KEY</code> "
+        "secret-lərini əlavə edin (pulsuz kredit verirlər)."
     )
 
 

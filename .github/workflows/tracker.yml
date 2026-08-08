@@ -41,6 +41,7 @@ jobs:
           SHEET_ID: ${{ secrets.SHEET_ID }}
           SCRAPERAPI_KEY: ${{ secrets.SCRAPERAPI_KEY }}
           SCRAPINGBEE_KEY: ${{ secrets.SCRAPINGBEE_KEY }}
+          SCRAPE_METHOD: ${{ vars.SCRAPE_METHOD || 'auto' }}
           BATCH_SIZE: ${{ github.event.inputs.batch_size || vars.BATCH_SIZE || 'auto' }}
           MARGIN_ALERT_PCT: ${{ vars.MARGIN_ALERT_PCT || '15' }}
           PRICE_RISE_MIN_USD: ${{ vars.PRICE_RISE_MIN_USD || '0.50' }}

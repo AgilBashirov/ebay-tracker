@@ -280,32 +280,55 @@ def scrape_ebay_price(browser: Browser, url: str) -> float | None:
 # ---------------------------------------------------------------------------
 
 def fetch_via_fallback(url: str) -> str | None:
-    """Bloklama olduqda pulsuz API kreditləri ilə cəhd edir."""
+    """
+    Pulsuz scraping API kreditləri ilə səhifəni gətirir.
+    Bu xidmətlər rezident proksi istifadə edir — Amazon bloklamır.
+    """
     import urllib.parse
     import urllib.request
 
     endpoints = []
     if config.SCRAPERAPI_KEY:
         endpoints.append(
-            "https://api.scraperapi.com/?api_key="
-            f"{config.SCRAPERAPI_KEY}&url={urllib.parse.quote(url, safe='')}"
+            (
+                "ScraperAPI",
+                "https://api.scraperapi.com/?api_key="
+                f"{config.SCRAPERAPI_KEY}&url={urllib.parse.quote(url, safe='')}"
+                "&country_code=us",
+            )
         )
     if config.SCRAPINGBEE_KEY:
         endpoints.append(
-            "https://app.scrapingbee.com/api/v1/?api_key="
-            f"{config.SCRAPINGBEE_KEY}&url={urllib.parse.quote(url, safe='')}"
-            "&render_js=false"
+            (
+                "ScrapingBee",
+                "https://app.scrapingbee.com/api/v1/?api_key="
+                f"{config.SCRAPINGBEE_KEY}&url={urllib.parse.quote(url, safe='')}"
+                "&render_js=false&country_code=us",
+            )
         )
 
-    for ep in endpoints:
+    for name, ep in endpoints:
         try:
-            req = urllib.request.Request(ep, headers={"User-Agent": random.choice(USER_AGENTS)})
-            with urllib.request.urlopen(req, timeout=60) as resp:
+            req = urllib.request.Request(
+                ep, headers={"User-Agent": random.choice(USER_AGENTS)}
+            )
+            with urllib.request.urlopen(req, timeout=90) as resp:
                 if resp.status == 200:
+                    print(f"    ↩️  {name} ilə oxundu")
                     return resp.read().decode("utf-8", errors="ignore")
-        except Exception:
+                print(f"    ⚠️  {name} HTTP {resp.status}")
+        except Exception as e:
+            print(f"    ⚠️  {name} xətası: {e}")
             continue
     return None
+
+
+def scrape_amazon_via_api(url: str) -> ScrapeResult:
+    """Yalnız API üzərindən oxuyur (birbaşa Amazon-a dəymir)."""
+    html = fetch_via_fallback(url)
+    if html is None:
+        raise RuntimeError("API kanalı cavab vermədi (kredit bitib ola bilər)")
+    return parse_amazon(html)
 
 
 # ---------------------------------------------------------------------------
