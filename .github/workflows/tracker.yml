@@ -1,0 +1,84 @@
+name: Qiymet Izleme
+
+on:
+  schedule:
+    # Hər saat başı işləyir. Yük saatlara yayılır — bloklamanın qarşısını alır.
+    - cron: "7 * * * *"
+  workflow_dispatch:
+    inputs:
+      batch_size:
+        description: "Bu işləmədə neçə məhsul yoxlansın"
+        required: false
+        default: "25"
+
+concurrency:
+  group: tracker
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Kitabxanaları quraşdır
+        run: |
+          pip install -r requirements.txt
+          playwright install chromium --with-deps
+
+      - name: Yoxlamanı işə sal
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SHEET_ID: ${{ secrets.SHEET_ID }}
+          SCRAPERAPI_KEY: ${{ secrets.SCRAPERAPI_KEY }}
+          SCRAPINGBEE_KEY: ${{ secrets.SCRAPINGBEE_KEY }}
+          BATCH_SIZE: ${{ github.event.inputs.batch_size || vars.BATCH_SIZE || '25' }}
+          MARGIN_ALERT_PCT: ${{ vars.MARGIN_ALERT_PCT || '15' }}
+          PRICE_RISE_MIN_USD: ${{ vars.PRICE_RISE_MIN_USD || '0.50' }}
+          PRICE_RISE_MIN_PCT: ${{ vars.PRICE_RISE_MIN_PCT || '2.0' }}
+          EBAY_FEE_PCT: ${{ vars.EBAY_FEE_PCT || '13.25' }}
+          TARGET_MARGIN_PCT: ${{ vars.TARGET_MARGIN_PCT || '0' }}
+          EBAY_PRICE_SOURCE: ${{ vars.EBAY_PRICE_SOURCE || 'scrape' }}
+          ALERT_ON_PRICE_DROP: ${{ vars.ALERT_ON_PRICE_DROP || '0' }}
+          DELAY_MIN_SEC: ${{ vars.DELAY_MIN_SEC || '8' }}
+          DELAY_MAX_SEC: ${{ vars.DELAY_MAX_SEC || '22' }}
+          PYTHONPATH: src
+        run: python src/main.py
+
+  # Günün sonunda qısa sağlamlıq hesabatı
+  health:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Yalnız 21:00-da işlə
+        id: gate
+        run: |
+          HOUR=$(date -u +%H)
+          if [ "$HOUR" = "17" ]; then echo "run=yes" >> $GITHUB_OUTPUT; else echo "run=no" >> $GITHUB_OUTPUT; fi
+      - name: Kitabxanalar
+        if: steps.gate.outputs.run == 'yes'
+        run: pip install -r requirements.txt
+      - name: Hesabat göndər
+        if: steps.gate.outputs.run == 'yes'
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SHEET_ID: ${{ secrets.SHEET_ID }}
+          PYTHONPATH: src
+        run: python src/report.py
