@@ -239,8 +239,8 @@ def pick_batch(rows, batch_size):
 
 
 def needs_ebay_refresh(row):
-    """eBay qiyməti köhnəlibsə (və ya heç yoxdursa) yenidən oxunmalıdır."""
-    if row["ebay_price"] is None:
+    """eBay məlumatı köhnəlibsə (və ya heç yoxdursa) yenidən oxunmalıdır."""
+    if row["ebay_price"] is None or row.get("ebay_qty") is None:
         return True
     if not row["last_check"]:
         return True
@@ -249,6 +249,31 @@ def needs_ebay_refresh(row):
     except ValueError:
         return True
     return datetime.utcnow() - last > timedelta(days=config.EBAY_REFRESH_DAYS)
+
+
+def should_fetch_ebay(row, amazon_in_stock: bool) -> bool:
+    """
+    eBay səhifəsini bu dəfə oxumağa dəyərmi?
+
+    API kreditini qorumaq üçün eBay-i HƏR işləmədə oxumuruq. Yalnız qərar
+    həqiqətən ondan asılı olanda oxuyuruq:
+      • məlumat heç yoxdur / köhnədir (həftəlik yenilənmə)
+      • listing bağlı görünür (say 0) — açılıb-açılmadığını bilmək lazımdır
+      • Amazon-da stok yoxdur — bildiriş göndərib-göndərməmək sayıdan asılıdır
+
+    Qalan hallarda (say > 0 və Amazon stokdadır) sheet-dəki dəyər kifayətdir.
+    """
+    if config.EBAY_PRICE_SOURCE != "scrape":
+        return False
+    if needs_ebay_refresh(row):
+        return True
+    qty = row.get("ebay_qty")
+    # Say azdırsa və ya sıfırdırsa vəziyyət tez dəyişə bilər — hər dəfə yoxlayırıq.
+    if qty is not None and qty <= config.EBAY_LOW_QTY:
+        return True
+    if not amazon_in_stock:
+        return True
+    return False
 
 
 # ---------------------------------------------------------------------------

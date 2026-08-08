@@ -106,10 +106,25 @@ Amazon GitHub-un server IP-lərini bloklayır (ilk sorğudan). Ona görə ən az
 
 **İkisini də əlavə edin** — birincinin krediti bitəndə sistem avtomatik ikinciyə keçir. Cəmi 2,000 kredit/ay.
 
-Kredit hesabı: hər məhsul gündə 1 dəfə yoxlanır.
-- 54 məhsul → ayda ~1,620 kredit ✅ pulsuz limitə sığır
-- 65 məhsul → ayda ~1,950 kredit ⚠️ limitin sərhədində
-- 100+ məhsul → pulsuz limit çatmır, ödənişli plan lazımdır (~$30-50/ay)
+### Kredit hesabı
+
+Sistem krediti qorumaq üçün eBay səhifəsini **hər dəfə oxumur** — yalnız qərar ondan asılı olanda:
+
+| eBay oxunur | eBay oxunmur (sheet-dən götürülür) |
+|---|---|
+| Məlumat yoxdur / 10 gündən köhnədir | Say 2-dən çoxdur **və** Amazon stokdadır |
+| Qalıq say ≤ 2 (tez bitə bilər) | |
+| Say 0 (bağlıdır — açılıbmı?) | |
+| Amazon-da stok yoxdur | |
+
+| Məhsul sayı | Aylıq kredit | Vəziyyət |
+|---|---|---|
+| 54 (indiki) | ~1,911 | ✅ 2,000 pulsuz limitə sığır |
+| 80 | ~2,832 | ⚠️ limiti keçir |
+| 150 | ~5,310 | ödənişli plan (~$30/ay) |
+| 500 | ~17,700 | ödənişli plan (~$50-80/ay) |
+
+**Limit dar gələndə pulsuz həll:** `CHECK_INTERVAL_DAYS` dəyişənini `2` edin — hər məhsul gündə deyil, iki gündən bir yoxlanacaq və kredit yarıya enəcək (54 məhsul üçün ~955). Qiymətlər saatbaşı dəyişmədiyi üçün bu, praktikada demək olar ki, fərq yaratmır.
 
 ### Addım 5 — İlk işləmə
 

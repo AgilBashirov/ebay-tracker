@@ -87,6 +87,12 @@ AUTO_BATCH_MIN = int(os.environ.get("AUTO_BATCH_MIN", "3"))
 AUTO_BATCH_MAX = int(os.environ.get("AUTO_BATCH_MAX", "60"))
 RUNS_PER_DAY = int(os.environ.get("RUNS_PER_DAY", "24"))  # cron saatlıq işləyir
 
+# Hər məhsul neçə gündən bir yoxlansın.
+# 1   = gündə bir dəfə (defolt)
+# 2   = iki gündən bir → API krediti yarıya enir
+# 0.5 = gündə iki dəfə → kredit iki dəfə artır
+CHECK_INTERVAL_DAYS = float(os.environ.get("CHECK_INTERVAL_DAYS", "1"))
+
 
 def resolve_batch_size(total_products: int) -> int:
     """Məhsul sayına görə bu işləmədə neçə məhsul yoxlanacağını qaytarır."""
@@ -100,7 +106,8 @@ def resolve_batch_size(total_products: int) -> int:
 
     if total_products <= 0:
         return AUTO_BATCH_MIN
-    per_run = math.ceil(total_products / RUNS_PER_DAY)
+    slots = max(1.0, RUNS_PER_DAY * CHECK_INTERVAL_DAYS)
+    per_run = math.ceil(total_products / slots)
     return max(AUTO_BATCH_MIN, min(AUTO_BATCH_MAX, per_run))
 
 # Məhsullar arası təsadüfi gecikmə (saniyə). Aşağı salmayın — bloklamanın əsas səbəbi budur.
@@ -123,8 +130,14 @@ PAGE_TIMEOUT_SEC = int(os.environ.get("PAGE_TIMEOUT_SEC", "45"))
 # "scrape" -> eBay listinginizdən avtomatik oxunur
 EBAY_PRICE_SOURCE = os.environ.get("EBAY_PRICE_SOURCE", "scrape")
 
-# eBay qiyməti neçə gündən bir yenilənsin (listing qiymətiniz tez-tez dəyişmir).
-EBAY_REFRESH_DAYS = int(os.environ.get("EBAY_REFRESH_DAYS", "7"))
+# eBay səhifəsi neçə gündən bir tam yenilənsin.
+# Öz listinginizin qiymətini siz təyin etdiyiniz üçün tez-tez oxumağa ehtiyac yoxdur —
+# bu, API kreditinə qənaət edir. Qalıq say azalanda və ya Amazon-da stok bitəndə
+# bu müddətdən asılı olmayaraq dərhal oxunur.
+EBAY_REFRESH_DAYS = int(os.environ.get("EBAY_REFRESH_DAYS", "10"))
+
+# Qalıq say bu həddə enəndə eBay hər yoxlamada oxunur (tezliklə bitə bilər).
+EBAY_LOW_QTY = int(os.environ.get("EBAY_LOW_QTY", "2"))
 
 # ---------------------------------------------------------------------------
 # AMAZON-A GİRİŞ ÜSULU

@@ -50,6 +50,7 @@ def run(health_report: bool = False) -> int:
     consecutive_blocks = 0
     block_reason = None
     processed = 0
+    ebay_fetches = 0
 
     # API rejimi: birbaşa Amazon-a dəymirik.
     # "api" seçilibsə əvvəldən, "auto"da isə ilk bloklamadan sonra aktivləşir.
@@ -123,10 +124,10 @@ def run(health_report: bool = False) -> int:
 
             # --- eBay qiyməti ---
             # eBay qiyməti + qalıq say.
-            # Qalıq sayı hər dəfə oxuyuruq — qərar məntiqi ondan asılıdır.
+            # API kreditini qorumaq üçün yalnız qərar ondan asılı olanda oxuyuruq.
             ebay_price = row["ebay_price"]
             ebay_qty = row["ebay_qty"]
-            if config.EBAY_PRICE_SOURCE == "scrape":
+            if sheets.should_fetch_ebay(row, data.in_stock):
                 if not api_mode:
                     scraper.polite_delay()
                 info = scraper.scrape_ebay_info(
@@ -141,6 +142,9 @@ def run(health_report: bool = False) -> int:
                           "(D/E sütunlarını əl ilə doldura bilərsiniz)")
                 else:
                     print(f"    eBay: qiymət {_m(ebay_price)} · qalıq {ebay_qty}")
+                ebay_fetches += 1
+            else:
+                print(f"    eBay: sheet-dən (qiymət {_m(ebay_price)} · qalıq {ebay_qty})")
 
             # --- Hesablama ---
             amazon_old = row["amazon_old"]
@@ -217,6 +221,10 @@ def run(health_report: bool = False) -> int:
 
     print("\n" + "=" * 60)
     print(f"Bitdi. {stats}")
+    if api_mode or stats["blocked"]:
+        used = processed + ebay_fetches
+        print(f"API kredit istifadəsi (təxmini): {used} "
+              f"({processed} Amazon + {ebay_fetches} eBay)")
     print("=" * 60)
     return 0
 
