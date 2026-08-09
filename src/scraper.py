@@ -188,6 +188,23 @@ NAME_PATTERNS = [
 AVAILABILITY_BLOCK = r'id=["\']?availability["\']?[^>]*>([\s\S]{0,400}?)</div>'
 
 
+def _element_content(html: str, start: int, tag: str = "div", limit: int = 6000) -> str:
+    """
+    Açılış teqindən sonrakı mövqedən başlayıb elementin ÖZ məzmununu qaytarır
+    (iç-içə teqləri sayaraq). Beləliklə qonşu blokların mətni qarışmır.
+    """
+    depth = 1
+    chunk = html[start: start + limit]
+    for m in re.finditer(rf"<(/?){tag}\b", chunk, re.I):
+        if m.group(1):
+            depth -= 1
+            if depth == 0:
+                return chunk[: m.start()]
+        else:
+            depth += 1
+    return chunk[:800]
+
+
 def parse_amazon(html: str) -> ScrapeResult:
     low = html.lower()
 
@@ -231,17 +248,14 @@ def parse_amazon(html: str) -> ScrapeResult:
                 except ValueError:
                     continue
 
-    # Stok mətni — yalnız availability elementindən
-    m = re.search(AVAILABILITY_BLOCK, html, re.S | re.I)
-    if m:
-        text = _clean(m.group(1))
-        # Bəzən element boş olur, sonrakı təkrarı yoxlayaq
-        if not text:
-            for m2 in re.finditer(AVAILABILITY_BLOCK, html, re.S | re.I):
-                text = _clean(m2.group(1))
-                if text:
-                    break
-        res.stock = text[:80]
+    # Stok mətni — availability elementinin YALNIZ öz məzmunundan.
+    # Sadəcə pəncərə götürmək olmaz: qonşu blokların mətni qarışır və
+    # "In Stock" olan məhsul "Currently unavailable" kimi oxunurdu.
+    for m in re.finditer(r'id=["\']?availability["\']?[^>]*>', html, re.I):
+        text = _clean(_element_content(html, m.end()))
+        if text and len(text) > 2:
+            res.stock = text[:80].strip()
+            break
 
     # Qalan say — YALNIZ stok mətnindən (səhifənin qalanı digər məhsullara aiddir)
     qm = re.search(r"only\s+(\d+)\s+left", res.stock, re.I)
@@ -275,20 +289,16 @@ def parse_amazon(html: str) -> ScrapeResult:
             res.stock = "In Stock"
 
     else:
-        # Qiymət yoxdur və availability də aydın deyil.
-        # Yalnız bu halda səhifədə açıq-aydın "əlçatmaz" siqnalı axtarırıq.
-        hard_oos = ("currently unavailable", "temporarily out of stock",
-                    "we don't know when or if this item will be back")
-        if any(x in low for x in hard_oos):
-            res.in_stock = False
-            res.stock = res.stock or "Currently unavailable"
-        else:
-            # Nə qiymət, nə aydın stok mesajı → bu, stok problemi deyil,
-            # oxuma problemidir. Səhv "stok bitdi" bildirişi göndərməyək.
-            res.in_stock = True
-            res.price = None
-            res.stock = res.stock or "Qiymət oxuna bilmədi"
-            res.notes.append("price_missing")
+        # Nə qiymət var, nə də aydın stok mesajı.
+        # VACİB: burada "stok bitdi" DEMİRİK. Səhifə boyu "currently unavailable"
+        # axtarmaq yanlış xəbərdarlıqlara səbəb olurdu (həmin ifadə digər
+        # variantlarda və bölmələrdə keçir). Stok bitibsə, yuxarıdakı
+        # `id="outOfStock"` yoxlaması onu artıq tutub.
+        # Bu, stok problemi deyil — oxuma problemidir.
+        res.in_stock = True
+        res.price = None
+        res.stock = res.stock or "Qiymət oxuna bilmədi"
+        res.notes.append("price_missing")
 
     return res
 
@@ -553,6 +563,10 @@ def polite_delay(api_mode: bool = False):
 
 
 def _clean(text: str) -> str:
+    # ƏVVƏLCƏ style/script bloklarını tam silirik — yoxsa CSS kodu mətnə düşür
+    # (məs. ".availabilityMoreDetailsIcon { width: 12px; ... }")
+    text = re.sub(r"<style[^>]*>[\s\S]*?</style>", " ", text, flags=re.I)
+    text = re.sub(r"<script[^>]*>[\s\S]*?</script>", " ", text, flags=re.I)
     text = re.sub(r"<[^>]+>", " ", text)
     text = (
         text.replace("&amp;", "&")
