@@ -188,6 +188,56 @@ NAME_PATTERNS = [
 AVAILABILITY_BLOCK = r'id=["\']?availability["\']?[^>]*>([\s\S]{0,400}?)</div>'
 
 
+# Tanınan stok cümlələri — sıra vacibdir (spesifikdən ümumiyə).
+STOCK_SENTENCES = [
+    r"Only\s+\d+\s+left in stock[^.<]*",
+    r"Temporarily out of stock",
+    r"Currently unavailable",
+    r"Out of [Ss]tock",
+    r"Usually ships within[^.<]*",
+    r"Available for immediate shipment",
+    r"Back in stock soon",
+    r"Pre-order",
+    r"In [Ss]tock",
+]
+
+# Kod/CSS əlaməti — belə mətn heç vaxt sheet-ə yazılmamalıdır.
+CODE_MARKERS = ["{", "}", ";", "px", "px;", "function", "var ", "#fff", "rgba("]
+
+
+def _sanitize_stock(text: str) -> str:
+    """
+    Stok mətnini yoxlayır və zibili kəsir.
+
+    Müdafiə qatı: Amazon HTML-i tez-tez dəyişir və availability elementinin
+    içində <style> blokları olur. Əgər mətn kod kimi görünürsə və ya tanış
+    stok ifadələrindən heç birini saxlamırsa, onu sheet-ə YAZMIRIQ.
+    """
+    if not text:
+        return ""
+    original_low = text.lower()
+
+    # CSS bloklarını çıxarırıq (mətn onların arasında ola bilər)
+    t = re.sub(r"\{[^}]*\}", " ", text)
+    t = re.sub(r"\s+", " ", t).strip()
+
+    # Tanınan stok cümləsi varsa — onu olduğu kimi götürürük
+    for pat in STOCK_SENTENCES:
+        m = re.search(pat, t)
+        if m:
+            return m.group(0).strip(" .·|-")[:80]
+
+    # Tanınmadı. İlkin mətndə kod əlaməti varsa — zibildir.
+    if any(marker in original_low for marker in CODE_MARKERS):
+        return ""
+
+    # CSS selektoruna oxşayırsa (".birSey" / "#birSey") — zibildir.
+    if re.fullmatch(r"[.#][\w-]+", t):
+        return ""
+
+    return t[:80] if len(t) > 2 else ""
+
+
 def _element_content(html: str, start: int, tag: str = "div", limit: int = 6000) -> str:
     """
     Açılış teqindən sonrakı mövqedən başlayıb elementin ÖZ məzmununu qaytarır
@@ -252,9 +302,9 @@ def parse_amazon(html: str) -> ScrapeResult:
     # Sadəcə pəncərə götürmək olmaz: qonşu blokların mətni qarışır və
     # "In Stock" olan məhsul "Currently unavailable" kimi oxunurdu.
     for m in re.finditer(r'id=["\']?availability["\']?[^>]*>', html, re.I):
-        text = _clean(_element_content(html, m.end()))
-        if text and len(text) > 2:
-            res.stock = text[:80].strip()
+        text = _sanitize_stock(_clean(_element_content(html, m.end())))
+        if text:
+            res.stock = text
             break
 
     # Qalan say — YALNIZ stok mətnindən (səhifənin qalanı digər məhsullara aiddir)
