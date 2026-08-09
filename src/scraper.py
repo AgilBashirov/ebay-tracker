@@ -474,42 +474,45 @@ def _ebay_qty_region(html: str) -> str:
 
 
 def _parse_ebay_qty(html: str) -> int | None:
+    """Bax: aşağıdakı _parse_ebay_qty_strict. Bu funksiya artıq ona yönləndirir."""
+    if config.EBAY_QTY_SOURCE != "scrape":
+        return None          # say yalnız sheet-dən (E sütunu) götürülür
+    return _parse_ebay_qty_strict(html)
+
+
+def _parse_ebay_qty_strict(html: str) -> int | None:
     """
-    eBay listinginizdəki qalıq sayı qaytarır.
-    0    -> listinq bitib (birmənalı siqnal)
-    None -> oxuna bilmədi (sheet-dəki dəyər saxlanılır)
+    YALNIZ birmənalı siqnalları qəbul edir. Şübhəli hallarda None qaytarır.
 
-    NİYƏ BU QƏDƏR EHTİYATLI:
-    eBay say modulunu JavaScript ilə çəkir, xam HTML-də çox vaxt olmur.
-    Dolayı siqnalların hamısı yalanış nəticə verdi:
-      • "out of stock"  -> variant JSON-unda keçir (açıq listinqi bağlı göstərirdi)
-      • "Last one"      -> marketinq etiketidir (HotnessSignalText), say deyil
-      • x-quantity yoxluğu -> açıq listinqlərdə də olmur
-    Ona görə yalnız birmənalı "N available" mətnini qəbul edirik.
-    Qalan hallarda None qaytarılır və sheet-dəki (sizin yazdığınız) dəyər qalır.
+    Qəbul edilənlər:
+      • "quantityAvailable": N   — eBay-in öz JSON sahəsi
+      • x-quantity__availability elementi içində "N available" / "Last one"
+      • x-quantity__availability elementi içində "Out of stock"
+
+    Qəbul EDİLMƏYƏNLƏR (təcrübədə yanlış çıxdı):
+      • səhifə boyu "N available" axtarışı  -> "N sold" və reklam bloklarını tutur
+      • səhifə boyu "Last one"              -> marketinq etiketidir
+      • səhifə boyu "out of stock"          -> variant JSON-unda keçir
+      • x-buybox bölgəsi                    -> qonşu blokların mətni qarışır
     """
-    low = html.lower()
+    m = re.search(r'"quantityAvailable"\s*:\s*(\d+)', html, re.I)
+    if m:
+        return int(m.group(1))
 
-    # 1) Açıq şəkildə bitmiş listinq
-    if any(m in low for m in EBAY_ENDED_MARKERS):
-        return 0
+    em = re.search(r'class=["\']?x-quantity__availability["\']?[^>]*>', html, re.I)
+    if not em:
+        return None
 
-    # 2) Yalnız birmənalı say mətni: "3 available" / "More than 10 available"
-    for pat in EBAY_QTY_PATTERNS:
-        m = re.search(pat, html, re.S | re.I)
-        if m:
-            digits = re.sub(r"[^\d]", "", m.group(1))
-            if digits:
-                return int(digits)
+    text = _clean(_element_content(html, em.end(), tag="div", limit=1200))
+    low = text.lower()
 
-    # 3) "Last one" — YALNIZ say modulunun içində olarsa etibarlıdır.
-    #    Səhifənin qalan hissəsindəki "LAST ONE" reklam etiketidir.
-    region = _ebay_qty_region(html)
-    if region and re.search(r"\blast one\b", region, re.I):
+    qm = re.search(r"(more than\s+)?([\d,]+)\s+available", low)
+    if qm:
+        return int(qm.group(2).replace(",", ""))
+    if "last one" in low:
         return 1
-    if region and any(m in region.lower() for m in EBAY_SOLDOUT_NARROW):
+    if "out of stock" in low or "sold out" in low:
         return 0
-
     return None
 
 

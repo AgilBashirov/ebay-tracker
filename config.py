@@ -46,20 +46,35 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 # ---------------------------------------------------------------------------
-# BİLDİRİŞ ŞƏRTLƏRİ
+# TELEGRAM BİLDİRİŞ ŞƏRTLƏRİ
 # ---------------------------------------------------------------------------
-# Amazon qiyməti bu qədər ($) və ya bu faizdən çox artarsa bildiriş gəlir.
+# Bildiriş YALNIZ bu üç halda gedir. Qalan bütün vəziyyətlər (marja azalması,
+# qiymət düşməsi, listinqin yenidən açıla bilməsi) sheet-də Status sütununda
+# görünür, amma Telegram-a mesaj göndərilmir.
+
+def _flag(name: str, default: bool) -> bool:
+    return os.environ.get(name, "1" if default else "0").strip() == "1"
+
+
+# 1) Amazon qiyməti bahalaşanda
+ALERT_ON_PRICE_RISE = _flag("ALERT_ON_PRICE_RISE", True)
 PRICE_RISE_MIN_USD = float(os.environ.get("PRICE_RISE_MIN_USD", "0.50"))
 PRICE_RISE_MIN_PCT = float(os.environ.get("PRICE_RISE_MIN_PCT", "2.0"))
 
-# Marja bu faizin altına düşərsə xəbərdarlıq.
+# 2) Amazon-dakı say sizin eBay sayınızdan az olanda
+ALERT_ON_LOW_QTY = _flag("ALERT_ON_LOW_QTY", True)
+
+# 3) Amazon-da stok bitəndə
+ALERT_ON_OUT_OF_STOCK = _flag("ALERT_ON_OUT_OF_STOCK", True)
+
+# --- Defolt olaraq BAĞLI olanlar (istəsəniz "1" edin) ---
+ALERT_ON_PRICE_DROP = _flag("ALERT_ON_PRICE_DROP", False)
+ALERT_ON_LOW_MARGIN = _flag("ALERT_ON_LOW_MARGIN", False)
+ALERT_ON_RESTOCK = _flag("ALERT_ON_RESTOCK", False)
+
+# Marja bu faizin altına düşərsə sheet-də "AZ MARJA" yazılır
+# (bildiriş yalnız ALERT_ON_LOW_MARGIN=1 olduqda).
 MARGIN_ALERT_PCT = float(os.environ.get("MARGIN_ALERT_PCT", "15.0"))
-
-# Stok bitəndə həmişə bildiriş.
-ALERT_ON_OUT_OF_STOCK = True
-
-# Qiymət düşəndə bildiriş (defolt: bağlı, spam olmasın deyə).
-ALERT_ON_PRICE_DROP = os.environ.get("ALERT_ON_PRICE_DROP", "0") == "1"
 
 # ---------------------------------------------------------------------------
 # eBay QİYMƏT TƏKLİFİ
@@ -186,6 +201,20 @@ PAGE_TIMEOUT_SEC = int(os.environ.get("PAGE_TIMEOUT_SEC", "45"))
 # "sheet"  -> D sütununu siz doldurursunuz (ən təhlükəsiz)
 # "scrape" -> eBay listinginizdən avtomatik oxunur
 EBAY_PRICE_SOURCE = os.environ.get("EBAY_PRICE_SOURCE", "scrape")
+
+# ---------------------------------------------------------------------------
+# eBay QALIQ SAYININ MƏNBƏYİ
+# ---------------------------------------------------------------------------
+# "sheet"  -> YALNIZ E sütunundakı dəyər (siz yazırsınız) — DEFOLT
+# "scrape" -> eBay səhifəsindən oxumağa cəhd edilir
+#
+# NİYƏ DEFOLT "sheet":
+# eBay qalıq sayı səhifədə JavaScript ilə çəkilir və xam HTML-də çox vaxt
+# olmur. Dolayı siqnallar (marketinq etiketləri, variant JSON-ları, "sold"
+# sayğacları) dəfələrlə YANLIŞ nəticə verdi — açıq listinqlər "bağlı" kimi,
+# satılan sayı isə qalıq kimi oxundu. Bu, səhv bildirişlərə səbəb olurdu.
+# Sizin öz sayınızı bilməyiniz bizim təxminimizdən qat-qat dəqiqdir.
+EBAY_QTY_SOURCE = os.environ.get("EBAY_QTY_SOURCE", "sheet").strip().lower()
 
 # eBay səhifəsi neçə gündən bir tam yenilənsin.
 # Öz listinginizin qiymətini siz təyin etdiyiniz üçün tez-tez oxumağa ehtiyac yoxdur —

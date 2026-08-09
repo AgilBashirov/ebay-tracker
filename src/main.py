@@ -173,6 +173,8 @@ def run(health_report: bool = False) -> int:
                 )
                 if info["price"]:
                     ebay_price = info["price"]
+                # Say yalnız "scrape" rejimində scraper-dən götürülür.
+                # Defolt rejimdə E sütunundakı sizin dəyəriniz qorunur.
                 if info["qty"] is not None:
                     ebay_qty = info["qty"]
                 if info["price"] is None and info["qty"] is None:
@@ -188,7 +190,7 @@ def run(health_report: bool = False) -> int:
             m_usd, m_pct = pricing.margin(ebay_price, amazon_new)
             fees = pricing.total_fees(ebay_price) if ebay_price else None
             suggested = pricing.suggest_ebay_price(ebay_price, amazon_old, amazon_new)
-            status, should_alert = pricing.classify(
+            status, should_alert, reason = pricing.classify(
                 ebay_price, amazon_old, amazon_new, data.in_stock, m_pct,
                 ebay_qty, data.qty
             )
@@ -205,7 +207,6 @@ def run(health_report: bool = False) -> int:
                 "product_name": data.name or row["product_name"],
                 "ebay_price": ebay_price,
                 "ebay_qty": ebay_qty,
-                "amazon_qty": data.qty,
                 "amazon_old": amazon_old,
                 "amazon_new": amazon_new,
                 "stock": data.stock,
@@ -215,6 +216,8 @@ def run(health_report: bool = False) -> int:
                 "suggested_ebay": suggested,
                 "next_check": next_check,
                 "status": status,
+                "reason": reason,
+                "amazon_qty": data.qty,
             }
             results.append(record)
 

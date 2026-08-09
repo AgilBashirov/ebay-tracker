@@ -214,6 +214,30 @@ def _round_price(value: float) -> float:
 # Status
 # ---------------------------------------------------------------------------
 
+# Bildiriş səbəbləri — Telegram mesajının başlığını bunlar müəyyən edir.
+REASON_PRICE_RISE = "PRICE_RISE"
+REASON_LOW_QTY = "LOW_QTY"
+REASON_OUT_OF_STOCK = "OUT_OF_STOCK"
+REASON_PRICE_DROP = "PRICE_DROP"
+REASON_LOW_MARGIN = "LOW_MARGIN"
+REASON_RESTOCK = "RESTOCK"
+
+_REASON_FLAGS = {
+    REASON_PRICE_RISE: "ALERT_ON_PRICE_RISE",
+    REASON_LOW_QTY: "ALERT_ON_LOW_QTY",
+    REASON_OUT_OF_STOCK: "ALERT_ON_OUT_OF_STOCK",
+    REASON_PRICE_DROP: "ALERT_ON_PRICE_DROP",
+    REASON_LOW_MARGIN: "ALERT_ON_LOW_MARGIN",
+    REASON_RESTOCK: "ALERT_ON_RESTOCK",
+}
+
+
+def _alert_enabled(reason: str | None) -> bool:
+    if reason is None:
+        return False
+    return bool(getattr(config, _REASON_FLAGS[reason], False))
+
+
 def classify(
     ebay_price: float | None,
     amazon_old: float | None,
@@ -222,47 +246,60 @@ def classify(
     margin_pct: float | None,
     ebay_qty: int | None = None,
     amazon_qty: int | None = None,
-) -> tuple[str, bool]:
+) -> tuple[str, bool, str | None]:
     """
-    (status_etiketi, bildiriş_lazımdır) qaytarır.
+    (sheet_statusu, bildiriş_getsin_mi, səbəb) qaytarır.
 
-    Say məntiqi:
-      eBay 0  + Amazon yoxdur     -> bildiriş YOX (listing onsuz da bağlıdır)
-      eBay 0  + Amazon var        -> bildiriş VAR (yenidən satışa çıxarmaq imkanı)
-      eBay >0 + Amazon yoxdur     -> bildiriş VAR (təcili: listingi dayandırın)
-      Amazon sayı < eBay sayınız  -> bildiriş VAR (sifarişi çatdıra bilməzsiniz)
+    PRİORİTET SIRASI — bir sətir üçün yalnız bir status olur:
+      1. Amazon-da stok yoxdur
+      2. Amazon-dakı say sizin eBay sayınızdan azdır
+      3. Amazon qiyməti artıb
+      4. Amazon qiyməti düşüb        (bildiriş defolt BAĞLI)
+      5. eBay listinqi bağlıdır      (bildiriş defolt BAĞLI)
+      6. Marja həddin altındadır     (bildiriş defolt BAĞLI)
+      7. OK
+
+    ebay_qty yalnız SİZİN E sütununa yazdığınız dəyərdir (təxmin edilmir).
+    amazon_qty yalnız Amazon "Only N left in stock" yazanda bilinir.
     """
     ebay_closed = ebay_qty is not None and ebay_qty <= 0
 
+    # ---- 1) Amazon-da stok yoxdur -------------------------------------------
     if not in_stock:
         if ebay_closed:
-            return "STOK YOX (eBay bağlı)", False
-        return "STOK YOX", config.ALERT_ON_OUT_OF_STOCK
+            # Sizin listinq onsuz da bağlıdır — tədbir tələb olunmur.
+            return "STOK YOX (eBay bağlı)", False, None
+        return "STOK YOX", _alert_enabled(REASON_OUT_OF_STOCK), REASON_OUT_OF_STOCK
 
-    if ebay_closed:
-        return "TEKRAR AC", True
-
-    if amazon_qty is not None and ebay_qty is not None and amazon_qty < ebay_qty:
-        return "AZ STOK", True
-
+    # ---- Məlumat çatmırsa, səssiz status -------------------------------------
     if amazon_new is None:
-        return "XETA Amazon qiyməti yoxdur", False
+        return "XETA Amazon qiyməti yoxdur", False, None
 
-    if ebay_price is None:
-        return "XETA eBay qiyməti yoxdur", False
+    # ---- 2) Amazon sayı < sizin eBay sayınız ---------------------------------
+    if (amazon_qty is not None and ebay_qty is not None
+            and ebay_qty > 0 and amazon_qty < ebay_qty):
+        return "AZ STOK", _alert_enabled(REASON_LOW_QTY), REASON_LOW_QTY
 
+    # ---- 3/4) Qiymət dəyişikliyi ---------------------------------------------
     if amazon_old is not None:
         diff = amazon_new - amazon_old
         pct = (diff / amazon_old * 100) if amazon_old else 0
         if diff >= config.PRICE_RISE_MIN_USD or pct >= config.PRICE_RISE_MIN_PCT:
-            return "QIYMET+ artdı", True
+            return "QIYMET+ artdı", _alert_enabled(REASON_PRICE_RISE), REASON_PRICE_RISE
         if diff <= -config.PRICE_RISE_MIN_USD or pct <= -config.PRICE_RISE_MIN_PCT:
-            return "QIYMET- düşdü", config.ALERT_ON_PRICE_DROP
+            return "QIYMET- düşdü", _alert_enabled(REASON_PRICE_DROP), REASON_PRICE_DROP
 
+    # ---- 5) Sizin listinq bağlıdır, Amazon-da isə var -------------------------
+    if ebay_closed:
+        return "TEKRAR AC", _alert_enabled(REASON_RESTOCK), REASON_RESTOCK
+
+    # ---- 6) Marja həddin altında ----------------------------------------------
+    if ebay_price is None:
+        return "XETA eBay qiyməti yoxdur", False, None
     if margin_pct is not None and margin_pct < config.MARGIN_ALERT_PCT:
-        return "AZ MARJA", True
+        return "AZ MARJA", _alert_enabled(REASON_LOW_MARGIN), REASON_LOW_MARGIN
 
-    return "OK", False
+    return "OK", False, None
 
 
 # ---------------------------------------------------------------------------
