@@ -13,6 +13,16 @@ on:
         description: "Bu işləmədə neçə məhsul yoxlansın (boş buraxın = avtomatik)"
         required: false
         default: "auto"
+      health:
+        description: "Sağlamlıq hesabatını da göndər (Telegram)"
+        required: false
+        type: boolean
+        default: false
+      only_health:
+        description: "YALNIZ hesabat göndər, məhsulları yoxlama"
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: tracker
@@ -21,6 +31,7 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
+    if: github.event.inputs.only_health != 'true'
     timeout-minutes: 50
 
     steps:
@@ -64,7 +75,7 @@ jobs:
   # Günün sonunda qısa sağlamlıq hesabatı
   health:
     runs-on: ubuntu-latest
-    if: github.event.schedule == '0 17 * * *'
+    if: github.event.schedule == '0 17 * * *' || github.event.inputs.health == 'true' || github.event.inputs.only_health == 'true'
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
