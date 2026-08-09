@@ -21,6 +21,19 @@ import scraper
 import sheets
 
 
+class _NoBrowser:
+    """API rejimi üçün boş brauzer — Chromium açılmır."""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def fetch_html(self, url):
+        raise RuntimeError("Birbaşa brauzer rejimi aktiv deyil (API rejimindəyik)")
+
+
 def run(health_report: bool = False) -> int:
     print("=" * 60)
     print("eBay Dropshipping — qiymət/stok yoxlaması")
@@ -71,7 +84,12 @@ def run(health_report: bool = False) -> int:
     if api_mode:
         print("🔑 API rejimi aktivdir — Amazon-a birbaşa sorğu getməyəcək.\n")
 
-    with scraper.Browser() as browser:
+    # API rejimində brauzerə ehtiyac yoxdur — Chromium açmırıq.
+    # Bu, həm sürət qazandırır, həm də Playwright quraşdırılmayıbsa
+    # işləmənin çökməsinin qarşısını alır.
+    browser_ctx = _NoBrowser() if api_mode else scraper.Browser()
+
+    with browser_ctx as browser:
         for idx, row in enumerate(batch, start=1):
             label = (row["product_name"] or row["amazon_link"])[:60]
             print(f"[{idx}/{len(batch)}] sətir {row['row']}: {label}")

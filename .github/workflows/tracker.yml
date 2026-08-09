@@ -45,7 +45,10 @@ jobs:
       - name: Kitabxanaları quraşdır
         run: |
           pip install -r requirements.txt
-          playwright install chromium --with-deps
+          # Playwright yalnız birbaşa rejim üçün lazımdır. GitHub-da API rejimi
+          # işlədiyi üçün quraşdırma alınmasa da işləmə davam etməlidir.
+          playwright install chromium --with-deps || \
+            echo "⚠️ Playwright quraşdırılmadı — API rejimi ilə davam edilir"
 
       - name: Yoxlamanı işə sal
         env:
