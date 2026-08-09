@@ -89,19 +89,21 @@ def apply_layout(ws):
 
     # ---- Sütun enləri ----
     widths = {
-        1: 150,   # A eBay Link
-        2: 150,   # B Amazon Link
-        3: 290,   # C Məhsul Adı
-        4: 95,    # D eBay Qiymətim
+        1: 145,   # A eBay Link
+        2: 145,   # B Amazon Link
+        3: 270,   # C Məhsul Adı
+        4: 90,    # D eBay Qiymətim
         5: 70,    # E eBay Say
-        6: 100,   # F Amazon (əvvəlki)
-        7: 100,   # G Amazon (indiki)
-        8: 145,   # H Stok
-        9: 85,    # I Marja $
-        10: 80,   # J Marja %
-        11: 105,  # K Tövsiyə eBay
-        12: 120,  # L Son Yoxlama
-        13: 150,  # M Status
+        6: 95,    # F Amazon (əvvəlki)
+        7: 95,    # G Amazon (indiki)
+        8: 140,   # H Stok
+        9: 90,    # I eBay Haqqı
+        10: 85,   # J Marja $
+        11: 80,   # K Marja %
+        12: 100,  # L Tövsiyə eBay
+        13: 115,  # M Son Yoxlama
+        14: 115,  # N Növbəti Yoxlama
+        15: 150,  # O Status
     }
     for col, px in widths.items():
         reqs.append({
@@ -143,14 +145,14 @@ def apply_layout(ws):
     align(5, 5, "CENTER")    # E eBay say
     align(6, 7, "RIGHT")     # F-G Amazon qiymətləri
     align(8, 8, "LEFT")      # H stok mətni
-    align(9, 11, "RIGHT")    # I-K marja + təklif
-    align(12, 13, "CENTER")  # L-M tarix + status
+    align(9, 12, "RIGHT")    # I-L haqq, marja, təklif
+    align(13, 15, "CENTER")  # M-O tarixlər + status
 
     # ---- Status sütunu qalın ----
     reqs.append({
         "repeatCell": {
             "range": {"sheetId": sheet_id, "startRowIndex": 1,
-                      "startColumnIndex": 12, "endColumnIndex": 13},
+                      "startColumnIndex": 14, "endColumnIndex": 15},
             "cell": {"userEnteredFormat": {
                 "textFormat": {"fontSize": 10, "bold": True}}},
             "fields": "userEnteredFormat.textFormat",
@@ -197,6 +199,8 @@ def read_rows(ws):
                 "amazon_old": _to_float(padded[config.COL["amazon_new"] - 1]),
                 "stock_old": padded[config.COL["stock"] - 1].strip(),
                 "last_check": padded[config.COL["last_check"] - 1].strip(),
+                "next_check": padded[config.COL["next_check"] - 1].strip(),
+                "prev_status": padded[config.COL["status"] - 1].strip(),
             }
         )
     return rows
@@ -219,8 +223,11 @@ def _to_float(text):
         return None
 
 
-def _parse_last_check(row):
-    raw = row.get("last_check") or ""
+def _parse_dt(raw):
+    """Sheet-dəki tarix mətnini datetime-a çevirir."""
+    raw = (raw or "").strip()
+    if not raw:
+        return None
     for fmt, length in (("%Y-%m-%d %H:%M", 16), ("%Y-%m-%d", 10)):
         try:
             return datetime.strptime(raw[:length], fmt)
@@ -229,42 +236,53 @@ def _parse_last_check(row):
     return None
 
 
-def pick_batch(rows, limit, interval_days=None):
-    """
-    Yalnız YOXLAMA VAXTI ÇATMIŞ məhsulları seçir (ən köhnədən başlayaraq).
+def _parse_last_check(row):
+    return _parse_dt(row.get("last_check"))
 
-    Niyə belə: GitHub cron "ən yaxşı cəhd" prinsipi ilə işləyir — bəzən saatda
-    bir dəfə, bəzən 3 saatda bir işə düşür. Sabit batch ölçüsü ilə işləməlar
-    ötürüləndə məhsullar geri qalırdı. Vaxtı çatanları seçmək bunu özü
-    kompensasiya edir: işləmələr seyrək olsa növbə böyüyür, tez-tez olsa kiçilir.
-    Nəticədə gündəlik yoxlama sayı işləmə tezliyindən asılı olmur.
-    """
-    if interval_days is None:
-        interval_days = config.CHECK_INTERVAL_DAYS
 
+def pick_batch(rows, limit, force=False):
+    """
+    Yoxlama vaxtı çatmış məhsulları seçir (ən gecikmişdən başlayaraq).
+
+    Hər sətirin öz "Növbəti Yoxlama" (N sütunu) vaxtı var. Sabit qalan məhsulun
+    aralığı tədricən uzanır (1→2→3 gün), dəyişkəni isə hər gün yoxlanılır.
+    Bu, API kreditinə əsas qənaət mexanizmidir.
+
+    force=True olduqda vaxt nəzərə alınmır (əl ilə məcburi işləmə).
+    """
     now = datetime.utcnow()
-    threshold = timedelta(days=interval_days)
 
     due = []
     for r in rows:
-        last = _parse_last_check(r)
-        if last is None or (now - last) >= threshold:
-            due.append((last or datetime.min, r))
+        nxt = _parse_dt(r.get("next_check"))
+        if force or nxt is None or nxt <= now:
+            # Sıralama açarı: gecikmə nə qədər çoxdursa, o qədər öndə
+            key = nxt or _parse_dt(r.get("last_check")) or datetime.min
+            due.append((key, r))
 
     due.sort(key=lambda pair: pair[0])
     return [r for _, r in due[:limit]]
 
 
-def count_due(rows, interval_days=None) -> int:
-    if interval_days is None:
-        interval_days = config.CHECK_INTERVAL_DAYS
+def count_due(rows) -> int:
     now = datetime.utcnow()
-    threshold = timedelta(days=interval_days)
     return sum(
         1 for r in rows
-        if (_parse_last_check(r) is None)
-        or (now - _parse_last_check(r)) >= threshold
+        if (_parse_dt(r.get("next_check")) is None)
+        or (_parse_dt(r.get("next_check")) <= now)
     )
+
+
+def previous_interval_days(row) -> float:
+    """
+    Bu sətirdə əvvəlki yoxlama aralığı neçə gün idi?
+    (Növbəti yoxlama − son yoxlama). Yoxdursa başlanğıc aralıq qaytarılır.
+    """
+    last = _parse_dt(row.get("last_check"))
+    nxt = _parse_dt(row.get("next_check"))
+    if last and nxt and nxt > last:
+        return round((nxt - last).total_seconds() / 86400, 2)
+    return config.CHECK_INTERVAL_DAYS
 
 
 def needs_ebay_refresh(row):
@@ -279,35 +297,53 @@ def needs_ebay_refresh(row):
         return True
     if not row["last_check"]:
         return True
-    try:
-        last = datetime.strptime(row["last_check"][:10], "%Y-%m-%d")
-    except ValueError:
+    last = _parse_dt(row["last_check"])
+    if last is None:
         return True
     return datetime.utcnow() - last > timedelta(days=config.EBAY_REFRESH_DAYS)
 
 
-def should_fetch_ebay(row, amazon_in_stock: bool) -> bool:
+def should_fetch_ebay(row, amazon_in_stock: bool,
+                      amazon_price_changed: bool = False) -> bool:
     """
     eBay səhifəsini bu dəfə oxumağa dəyərmi?
 
-    API kreditini qorumaq üçün eBay-i HƏR işləmədə oxumuruq. Yalnız qərar
-    həqiqətən ondan asılı olanda oxuyuruq:
-      • məlumat heç yoxdur / köhnədir (həftəlik yenilənmə)
-      • listing bağlı görünür (say 0) — açılıb-açılmadığını bilmək lazımdır
-      • Amazon-da stok yoxdur — bildiriş göndərib-göndərməmək sayıdan asılıdır
+    ƏSAS PRİNSİP: eBay qiymətiniz yalnız SİZ onu dəyişəndə dəyişir — Amazon
+    kimi öz-özünə tərpənmir. Ona görə dövri oxumaq krediti boş yerə yandırır.
+    Yalnız marja hesabının nəticəsi dəyişə biləcək hallarda oxuyuruq:
 
-    Qalan hallarda (say > 0 və Amazon stokdadır) sheet-dəki dəyər kifayətdir.
+      1. Yeni məhsul     — sheet-də eBay qiyməti hələ yoxdur
+      2. Qiymət fərqi    — Amazon qiyməti dəyişib, marja yenidən hesablanır
+      3. Təklif vermişik — keçən dəfə "qiyməti dəyiş" dedik, tətbiq olunubmu?
+      4. Stok yoxdur     — bildiriş qərarı üçün eBay sayı lazımdır
+      5. Çox köhnədir    — təhlükəsizlik üçün 30 gündə bir
+
+    Qalan hallarda sheet-dəki dəyər istifadə olunur (kredit sərf olunmur).
     """
     if config.EBAY_PRICE_SOURCE != "scrape":
         return False
-    if needs_ebay_refresh(row):
+
+    # 1) Yeni məhsul
+    if row.get("ebay_price") is None:
         return True
-    qty = row.get("ebay_qty")
-    # Say azdırsa və ya sıfırdırsa vəziyyət tez dəyişə bilər — hər dəfə yoxlayırıq.
-    if qty is not None and qty <= config.EBAY_LOW_QTY:
+
+    # 2) Amazon qiyməti dəyişib — marja dəyişir
+    if amazon_price_changed:
         return True
+
+    # 3) Keçən dəfə qiymət dəyişikliyi tövsiyə etmişdik — icra olunubmu?
+    prev = (row.get("prev_status") or "").strip()
+    if prev.startswith(("QIYMET", "AZ MARJA", "TEKRAR AC", "AZ STOK")):
+        return True
+
+    # 4) Amazon-da stok yoxdur — bildiriş qərarı eBay sayından asılıdır
     if not amazon_in_stock:
         return True
+
+    # 5) Uzun müddət oxunmayıb
+    if needs_ebay_refresh(row):
+        return True
+
     return False
 
 
@@ -331,7 +367,7 @@ def write_results(ws, results):
         qty = r.get("ebay_qty")
         updates.append(
             {
-                "range": f"C{row}:M{row}",
+                "range": f"C{row}:O{row}",
                 "values": [
                     [
                         r.get("product_name", ""),
@@ -340,10 +376,12 @@ def write_results(ws, results):
                         _fmt_money(r.get("amazon_old")),
                         _fmt_money(r.get("amazon_new")),
                         r.get("stock", ""),
+                        _fmt_money(r.get("ebay_fee")),
                         _fmt_money(r.get("margin_usd")),
                         _fmt_pct(r.get("margin_pct")),
                         _fmt_money(r.get("suggested_ebay")),
                         now,
+                        r.get("next_check", ""),
                         r.get("status", ""),
                     ]
                 ],

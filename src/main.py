@@ -13,6 +13,7 @@ Hər işləmədə:
 import argparse
 import sys
 import traceback
+from datetime import datetime, timedelta
 
 import config
 import notify
@@ -52,13 +53,11 @@ def run(health_report: bool = False) -> int:
     forced = config.BATCH_SIZE != "auto"
 
     if forced:
-        print(f"⚡ Məcburi işləmə — vaxt intervalı nəzərə alınmır. Limit: {limit}")
-        batch = sheets.pick_batch(all_rows, limit, interval_days=0)
+        print(f"⚡ Məcburi işləmə — yoxlama vaxtı nəzərə alınmır. Limit: {limit}")
+        batch = sheets.pick_batch(all_rows, limit, force=True)
     else:
         due = sheets.count_due(all_rows)
-        print(f"Yoxlama vaxtı çatıb: {due} məhsul "
-              f"(interval: hər {config.CHECK_INTERVAL_DAYS} gündə bir)")
-        print(f"Bu işləmənin limiti: {limit}")
+        print(f"Yoxlama vaxtı çatıb: {due} məhsul (limit: {limit})")
         batch = sheets.pick_batch(all_rows, limit)
 
     print(f"Bu işləmədə yoxlanacaq: {len(batch)} məhsul.\n")
@@ -95,7 +94,8 @@ def run(health_report: bool = False) -> int:
             print(f"[{idx}/{len(batch)}] sətir {row['row']}: {label}")
 
             if not row["amazon_link"].startswith("http"):
-                results.append({**_base(row), "status": "XETA link yoxdur"})
+                results.append({**_base(row), "status": "XETA link yoxdur",
+                                "next_check": _next_check(row, "XETA link yoxdur", False)})
                 stats["error"] += 1
                 continue
 
@@ -127,7 +127,8 @@ def run(health_report: bool = False) -> int:
 
                 if data is None:
                     consecutive_blocks += 1
-                    results.append({**_base(row), "status": "BLOKLANDI"})
+                    results.append({**_base(row), "status": "BLOKLANDI",
+                                "next_check": _next_check(row, "BLOKLANDI", False)})
                     if consecutive_blocks >= config.BLOCK_ABORT_THRESHOLD:
                         print("\n🛑 Ardıcıl bloklama həddi keçildi — işləmə dayandırılır.")
                         break
@@ -136,14 +137,16 @@ def run(health_report: bool = False) -> int:
 
             except scraper.NotFoundError:
                 print("    ❌ Səhifə tapılmadı (404)")
-                results.append({**_base(row), "status": "XETA link ölüdür"})
+                results.append({**_base(row), "status": "XETA link ölüdür",
+                                "next_check": _next_check(row, "XETA link ölüdür", False)})
                 stats["error"] += 1
                 scraper.polite_delay(api_mode)
                 continue
 
             except Exception as e:
                 print(f"    ❌ Xəta: {e}")
-                results.append({**_base(row), "status": "XETA"})
+                results.append({**_base(row), "status": "XETA",
+                                "next_check": _next_check(row, "XETA", False)})
                 stats["error"] += 1
                 scraper.polite_delay(api_mode)
                 continue
@@ -153,9 +156,16 @@ def run(health_report: bool = False) -> int:
             # --- eBay qiyməti ---
             # eBay qiyməti + qalıq say.
             # API kreditini qorumaq üçün yalnız qərar ondan asılı olanda oxuyuruq.
+            amazon_old = row["amazon_old"]
+            amazon_new = data.price
+            price_changed = (
+                amazon_old is not None and amazon_new is not None
+                and abs(amazon_new - amazon_old) >= 0.01
+            )
+
             ebay_price = row["ebay_price"]
             ebay_qty = row["ebay_qty"]
-            if sheets.should_fetch_ebay(row, data.in_stock):
+            if sheets.should_fetch_ebay(row, data.in_stock, price_changed):
                 if not api_mode:
                     scraper.polite_delay(api_mode)
                 info = scraper.scrape_ebay_info(
@@ -175,19 +185,19 @@ def run(health_report: bool = False) -> int:
                 print(f"    eBay: sheet-dən (qiymət {_m(ebay_price)} · qalıq {ebay_qty})")
 
             # --- Hesablama ---
-            amazon_old = row["amazon_old"]
-            amazon_new = data.price
-
             m_usd, m_pct = pricing.margin(ebay_price, amazon_new)
+            fees = pricing.total_fees(ebay_price) if ebay_price else None
             suggested = pricing.suggest_ebay_price(ebay_price, amazon_old, amazon_new)
             status, should_alert = pricing.classify(
                 ebay_price, amazon_old, amazon_new, data.in_stock, m_pct,
                 ebay_qty, data.qty
             )
 
+            next_check = _next_check(row, status, price_changed)
+
             print(
                 f"    Amazon: {_m(amazon_old)} → {_m(amazon_new)} | "
-                f"{data.stock} | marja {_m(m_usd)} | {status}"
+                f"{data.stock} | haqq {_m(fees)} | marja {_m(m_usd)} | {status}"
             )
 
             record = {
@@ -199,9 +209,11 @@ def run(health_report: bool = False) -> int:
                 "amazon_old": amazon_old,
                 "amazon_new": amazon_new,
                 "stock": data.stock,
+                "ebay_fee": fees,
                 "margin_usd": m_usd,
                 "margin_pct": m_pct,
                 "suggested_ebay": suggested,
+                "next_check": next_check,
                 "status": status,
             }
             results.append(record)
@@ -261,6 +273,13 @@ def run(health_report: bool = False) -> int:
     return 0
 
 
+def _next_check(row, status: str, price_changed: bool) -> str:
+    """Məhsulun növbəti yoxlama vaxtını hesablayır (sheet-in N sütunu)."""
+    prev = sheets.previous_interval_days(row)
+    days = pricing.next_interval_days(status, price_changed, prev)
+    return (datetime.utcnow() + timedelta(days=days)).strftime("%Y-%m-%d %H:%M")
+
+
 def _base(row):
     return {
         "row": row["row"],
@@ -273,6 +292,7 @@ def _base(row):
         "margin_usd": None,
         "margin_pct": None,
         "suggested_ebay": None,
+        "ebay_fee": None,
     }
 
 

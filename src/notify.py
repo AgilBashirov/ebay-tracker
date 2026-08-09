@@ -144,6 +144,13 @@ def format_alerts(alerts: list[dict]) -> str:
             m_usd, m_pct = a.get("margin_usd"), a.get("margin_pct")
             if ebay is not None:
                 lines.append(f"   Sizin eBay: {_money(ebay)}")
+            fee = a.get("ebay_fee")
+            if fee is not None:
+                parts = [f"FVF {config.EBAY_FVF_PCT:.1f}%"]
+                if config.EBAY_AD_RATE_PCT:
+                    parts.append(f"reklam {config.EBAY_AD_RATE_PCT:.1f}%")
+                parts.append(f"əməliyyat ${config.EBAY_ORDER_FEE:.2f}")
+                lines.append(f"   eBay haqqı: {_money(fee)} ({', '.join(parts)})")
             if m_usd is not None:
                 lines.append(f"   Marja: <b>{_money(m_usd)}</b> ({m_pct:.1f}%)")
                 if a["status"].startswith("AZ MARJA"):

@@ -119,12 +119,14 @@ Sistem krediti qorumaq üçün eBay səhifəsini **hər dəfə oxumur** — yaln
 
 | Məhsul sayı | Aylıq kredit | Vəziyyət |
 |---|---|---|
-| 54 (indiki) | ~1,911 | ✅ 2,000 pulsuz limitə sığır |
-| 80 | ~2,832 | ⚠️ limiti keçir |
-| 150 | ~5,310 | ödənişli plan (~$30/ay) |
-| 500 | ~17,700 | ödənişli plan (~$50-80/ay) |
+| 54 (indiki) | ~911 | ✅ 2,000 pulsuz limitə rahat sığır |
+| 100 | ~1,687 | ✅ sığır |
+| 150 | ~2,531 | ⚠️ limiti keçir |
+| 500 | ~8,436 | ödənişli plan (~$30-50/ay) |
 
-**Limit dar gələndə pulsuz həll:** `CHECK_INTERVAL_DAYS` dəyişənini `2` edin — hər məhsul gündə deyil, iki gündən bir yoxlanacaq və kredit yarıya enəcək (54 məhsul üçün ~955). Qiymətlər saatbaşı dəyişmədiyi üçün bu, praktikada demək olar ki, fərq yaratmır.
+*(Uyğunlaşan yoxlama tezliyi sayəsində bu rəqəmlər əvvəlkindən təxminən 2 dəfə azdır — 54 məhsulda 1,911 yerinə 911.)*
+
+**Limit dar gələndə pulsuz həll:** `MAX_INTERVAL_DAYS` dəyişənini `4` və ya `5` edin — sabit məhsullar daha seyrək yoxlanacaq.
 
 ### Addım 5 — İlk işləmə
 
@@ -144,15 +146,44 @@ Bundan sonra hər saat özü işləyəcək.
 | B | Amazon Link | **Siz** |
 | C | Məhsul Adı | avtomatik |
 | D | eBay Qiymətim | avtomatik (eBay linkindən) |
-| E | eBay Say | avtomatik (listinginizdəki qalıq) |
+| E | eBay Say | avtomatik / **əl ilə yaza bilərsiniz** |
 | F | Amazon (əvvəlki) | avtomatik |
 | G | Amazon (indiki) | avtomatik |
 | H | Stok | avtomatik |
-| I | Marja $ | avtomatik |
-| J | Marja % | avtomatik |
-| K | Tövsiyə eBay | avtomatik |
-| L | Son Yoxlama | avtomatik |
-| M | Status | avtomatik |
+| I | eBay Haqqı | avtomatik (FVF + reklam + əməliyyat) |
+| J | Marja $ | avtomatik |
+| K | Marja % | avtomatik |
+| L | Tövsiyə eBay | avtomatik |
+| M | Son Yoxlama | avtomatik |
+| N | Növbəti Yoxlama | avtomatik (kredit qənaəti) |
+| O | Status | avtomatik |
+
+### Marja necə hesablanır
+
+ebayfeescalculator.com ilə eyni düsturla — sentinə qədər uyğun:
+
+```
+vergi       = (satış + göndərmə) × vergi%
+haqq bazası = satış + göndərmə + vergi
+FVF         = baza × 13.6%
+reklam      = baza × reklam%
+əməliyyat   = $0.40   (sifariş ≤ $10 olduqda $0.30)
+marja       = satış − Amazon qiyməti − haqlar
+```
+
+⚠️ Satış vergisi sizə çatmır, amma **haqq bazasını artırır** — yəni vergi sizin xərcinizdir. Sadə "13.25% çıx" hesabı marjanı ~$4-5 şişirdirdi.
+
+### Yoxlama tezliyi özü tənzimlənir (N sütunu)
+
+| Vəziyyət | Növbəti yoxlama |
+|---|---|
+| Qiymət dəyişib | 1 gün |
+| Diqqət tələb edir (az marja, az stok, stok yox) | 1 gün |
+| Sabit qalır | 1 → 2 → 3 gün (tədricən uzanır) |
+| Ölü link / xəta | 7 gün |
+| Bloklanıb | ~2 saat (başqa IP ilə) |
+
+Bu, API kreditini **təxminən 3 dəfə** azaldır: sabit məhsulları hər gün yox, 3 gündən bir yoxlayır.
 
 ### Stok bildirişi məntiqi
 
@@ -187,10 +218,17 @@ Repo → **Settings** → **Secrets and variables** → **Actions** → **Variab
 | Dəyişən | Defolt | İzah |
 |---|---|---|
 | `BATCH_SIZE` | auto | Hər işləmədə neçə məhsul — **toxunmayın**, özü hesablayır |
+| `MAX_INTERVAL_DAYS` | 3 | Sabit məhsul ən çox neçə gündən bir yoxlansın |
+| `ERROR_INTERVAL_DAYS` | 7 | Ölü link neçə gündən bir təkrar yoxlansın |
 | `MARGIN_ALERT_PCT` | 15 | Marja bu %-in altına düşəndə xəbərdarlıq |
 | `PRICE_RISE_MIN_USD` | 0.50 | Bu qədər $ artımdan sonra bildiriş |
 | `PRICE_RISE_MIN_PCT` | 2.0 | Bu qədər % artımdan sonra bildiriş |
-| `EBAY_FEE_PCT` | 13.25 | eBay komissiyanız |
+| `EBAY_FVF_PCT` | 13.6 | Final Value Fee (kateqoriyanıza uyğun) |
+| `EBAY_AD_RATE_PCT` | 0 | Promoted Listings reklam dərəcəsi — **işlədirsinizsə mütləq yazın** |
+| `SALES_TAX_PCT` | 10 | Alıcıdan alınan satış vergisi (haqq bazasını artırır) |
+| `EBAY_ORDER_FEE` | 0.40 | Sifariş başına haqq ($10-dan aşağıda 0.30) |
+| `EBAY_INTERNATIONAL_PCT` | 0 | Xaricə satırsınızsa 1.65 |
+| `SHIPPING_CHARGED` / `SHIPPING_COST` | 0 / 0 | Göndərmə haqqı və xərci |
 | `TARGET_MARGIN_PCT` | 0 | 0 = mövcud marjanı qoru. 25 yazsanız hər məhsulda 25% hədəflənər |
 | `ALERT_ON_PRICE_DROP` | 0 | 1 edin ki, qiymət düşəndə də xəbər gəlsin |
 | `EBAY_PRICE_SOURCE` | scrape | `sheet` edin ki, D sütununu özünüz doldurasınız |

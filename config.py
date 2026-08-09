@@ -23,16 +23,19 @@ COL = {
     "amazon_old":     6,   # F
     "amazon_new":     7,   # G
     "stock":          8,   # H
-    "margin_usd":     9,   # I
-    "margin_pct":    10,   # J
-    "suggested_ebay": 11,  # K
-    "last_check":    12,   # L
-    "status":        13,   # M
+    "ebay_fee":       9,   # I  <- eBay haqları (FVF + reklam + əməliyyat)
+    "margin_usd":    10,   # J
+    "margin_pct":    11,   # K
+    "suggested_ebay": 12,  # L
+    "last_check":    13,   # M
+    "next_check":    14,   # N  <- növbəti yoxlama vaxtı (kredit qənaəti)
+    "status":        15,   # O
 }
 HEADERS = [
     "eBay Link", "Amazon Link", "Məhsul Adı", "eBay Qiymətim", "eBay Say",
     "Amazon (əvvəlki)", "Amazon (indiki)", "Stok",
-    "Marja $", "Marja %", "Tövsiyə eBay", "Son Yoxlama", "Status",
+    "eBay Haqqı", "Marja $", "Marja %", "Tövsiyə eBay",
+    "Son Yoxlama", "Növbəti Yoxlama", "Status",
 ]
 FIRST_DATA_ROW = 2
 
@@ -66,8 +69,38 @@ TARGET_MARGIN_PCT = float(os.environ.get("TARGET_MARGIN_PCT", "0"))
 # 0 = mövcud marjanızı qoruyur (Amazon nə qədər artıbsa, eBay də o qədər artır).
 # Məs. 25 yazsanız, hər məhsulda 25% marja hədəflənəcək.
 
-# eBay komissiyası + göndərmə payı (təklif hesablanarkən nəzərə alınır).
-EBAY_FEE_PCT = float(os.environ.get("EBAY_FEE_PCT", "13.25"))
+# ---------------------------------------------------------------------------
+# eBay HAQLARI (ebayfeescalculator.com modeli ilə eyni)
+# ---------------------------------------------------------------------------
+# Vergi bazası = satış qiyməti + göndərmə haqqı + alıcıdan alınan satış vergisi
+# FVF və reklam haqqı MƏHZ bu bazadan hesablanır — yəni vergi sizin haqqınızı
+# artırır, baxmayaraq ki, vergi pulu sizə çatmır.
+
+# Final Value Fee faizi. Mağazası olmayan satıcı, "Everything else" kateqoriyası
+# üçün 13.6%. Öz kateqoriyanıza uyğun dəyişin.
+EBAY_FVF_PCT = float(os.environ.get("EBAY_FVF_PCT", "13.6"))
+
+# Promoted Listings reklam dərəcəsi (%). Reklam işlətmirsinizsə 0 qoyun.
+EBAY_AD_RATE_PCT = float(os.environ.get("EBAY_AD_RATE_PCT", "0"))
+
+# Sifariş başına sabit əməliyyat haqqı.
+EBAY_ORDER_FEE = float(os.environ.get("EBAY_ORDER_FEE", "0.40"))
+EBAY_ORDER_FEE_LOW = float(os.environ.get("EBAY_ORDER_FEE_LOW", "0.30"))
+EBAY_ORDER_FEE_THRESHOLD = float(os.environ.get("EBAY_ORDER_FEE_THRESHOLD", "10"))
+
+# Alıcıdan alınan satış vergisi (%). ABŞ-da ştatdan asılıdır, orta ~8-10%.
+# eBay bunu alıcıdan yığır, sizə çatmır, AMMA haqq bazasını artırır.
+SALES_TAX_PCT = float(os.environ.get("SALES_TAX_PCT", "10"))
+
+# Beynəlxalq satış əlavəsi (%). Yalnız xaricə satırsınızsa 1.65 qoyun.
+EBAY_INTERNATIONAL_PCT = float(os.environ.get("EBAY_INTERNATIONAL_PCT", "0"))
+
+# Alıcıdan aldığınız göndərmə haqqı və sizin göndərmə xərciniz (adətən 0).
+SHIPPING_CHARGED = float(os.environ.get("SHIPPING_CHARGED", "0"))
+SHIPPING_COST = float(os.environ.get("SHIPPING_COST", "0"))
+
+# Köhnə ad — geriyə uyğunluq üçün saxlanılır.
+EBAY_FEE_PCT = EBAY_FVF_PCT
 
 # Təklif olunan qiyməti yuvarlaqlaşdırma: "99" -> x.99, "none" -> yuvarlaqlaşdırma yox
 PRICE_ROUNDING = os.environ.get("PRICE_ROUNDING", "99")
@@ -87,11 +120,26 @@ AUTO_BATCH_MIN = int(os.environ.get("AUTO_BATCH_MIN", "3"))
 AUTO_BATCH_MAX = int(os.environ.get("AUTO_BATCH_MAX", "60"))
 RUNS_PER_DAY = int(os.environ.get("RUNS_PER_DAY", "24"))  # cron saatlıq işləyir
 
-# Hər məhsul neçə gündən bir yoxlansın.
-# 1   = gündə bir dəfə (defolt)
-# 2   = iki gündən bir → API krediti yarıya enir
-# 0.5 = gündə iki dəfə → kredit iki dəfə artır
-CHECK_INTERVAL_DAYS = float(os.environ.get("CHECK_INTERVAL_DAYS", "1"))
+# ---------------------------------------------------------------------------
+# UYĞUNLAŞAN YOXLAMA TEZLİYİ (API kreditinə qənaətin əsas mexanizmi)
+# ---------------------------------------------------------------------------
+# Hər məhsulun öz "növbəti yoxlama" vaxtı olur (N sütunu).
+# Qiyməti dəyişən məhsul tez-tez, sabit qalan isə getdikcə seyrək yoxlanılır.
+# Nəticə: 54 sabit məhsulda kredit sərfi ~3 dəfə azalır.
+
+CHECK_INTERVAL_DAYS = float(os.environ.get("CHECK_INTERVAL_DAYS", "1"))  # başlanğıc
+
+# Sabit qalan məhsul üçün maksimum aralıq (gün).
+MAX_INTERVAL_DAYS = float(os.environ.get("MAX_INTERVAL_DAYS", "3"))
+
+# Diqqət tələb edən məhsul (az marja, az stok, stok yox) neçə gündən bir.
+ATTENTION_INTERVAL_DAYS = float(os.environ.get("ATTENTION_INTERVAL_DAYS", "1"))
+
+# Xəta (ölü link, oxuna bilməyən səhifə) — boş yerə kredit yandırmamaq üçün.
+ERROR_INTERVAL_DAYS = float(os.environ.get("ERROR_INTERVAL_DAYS", "7"))
+
+# Bloklama — növbəti işləmə başqa IP-dən gedəcək, tez təkrar cəhd edirik.
+BLOCKED_INTERVAL_DAYS = float(os.environ.get("BLOCKED_INTERVAL_DAYS", "0.08"))  # ~2 saat
 
 
 def resolve_batch_size(total_products: int) -> int:
@@ -143,7 +191,7 @@ EBAY_PRICE_SOURCE = os.environ.get("EBAY_PRICE_SOURCE", "scrape")
 # Öz listinginizin qiymətini siz təyin etdiyiniz üçün tez-tez oxumağa ehtiyac yoxdur —
 # bu, API kreditinə qənaət edir. Qalıq say azalanda və ya Amazon-da stok bitəndə
 # bu müddətdən asılı olmayaraq dərhal oxunur.
-EBAY_REFRESH_DAYS = int(os.environ.get("EBAY_REFRESH_DAYS", "10"))
+EBAY_REFRESH_DAYS = int(os.environ.get("EBAY_REFRESH_DAYS", "30"))
 
 # Qalıq say bu həddə enəndə eBay hər yoxlamada oxunur (tezliklə bitə bilər).
 EBAY_LOW_QTY = int(os.environ.get("EBAY_LOW_QTY", "2"))
