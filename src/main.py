@@ -181,6 +181,15 @@ def run(health_report: bool = False) -> int:
                 else:
                     print("    ⚠️  eBay API cavab vermədi — sheet dəyəri saxlanılır")
 
+                # API qiymət vermədisə (variasiyalı listinq və s.) səhifədən oxuyaq
+                if ebay_price is None:
+                    fb = scraper.scrape_ebay_info(
+                        browser, row["ebay_link"], api_mode=api_mode)
+                    if fb["price"]:
+                        ebay_price = fb["price"]
+                        print(f"    ↩️  eBay qiyməti səhifədən: {_m(ebay_price)}")
+                    ebay_fetches += 1
+
             elif sheets.should_fetch_ebay(row, data.in_stock, price_changed):
                 if not api_mode:
                     scraper.polite_delay(api_mode)

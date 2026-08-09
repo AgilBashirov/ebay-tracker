@@ -127,12 +127,42 @@ def fetch_item(url_or_id: str) -> dict | None:
     return _parse_item(data)
 
 
+def _price_from(node) -> float | None:
+    """İç-içə strukturlardan qiymət dəyərini çıxarır."""
+    if not isinstance(node, dict):
+        return None
+    for key in ("value", "convertedFromValue"):
+        if key in node:
+            try:
+                return float(node[key])
+            except (TypeError, ValueError):
+                pass
+    return None
+
+
 def _parse_item(data: dict) -> dict:
-    price = None
-    try:
-        price = float(data["price"]["value"])
-    except (KeyError, TypeError, ValueError):
-        pass
+    """
+    Qiymət mənbələri sıra ilə yoxlanılır. Variasiyalı (multi-variation)
+    listinqlərdə əsas `price` sahəsi boş ola bilər — bu halda qiymət
+    diapazonundan və ya ilk variantdan götürülür.
+    """
+    price = _price_from(data.get("price"))
+
+    if price is None:
+        # Variasiyalı listinq: qiymət diapazonu
+        pr = data.get("priceRange") or {}
+        price = _price_from(pr.get("minPrice")) or _price_from(pr.get("maxPrice"))
+
+    if price is None:
+        # Hərrac və ya "current bid" formatı
+        price = _price_from(data.get("currentBidPrice"))
+
+    if price is None:
+        # Variantların ilk qiyməti
+        for grp in (data.get("itemGroupSummaries") or []):
+            price = _price_from((grp.get("price") or {}))
+            if price:
+                break
 
     qty, exact, status = None, False, None
     for av in data.get("estimatedAvailabilities") or []:

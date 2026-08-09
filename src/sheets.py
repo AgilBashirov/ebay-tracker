@@ -4,6 +4,7 @@ Sətir sayı dinamikdir — 54 da olsa, 500 də olsa avtomatik tutur.
 """
 import json
 import os
+import re
 from datetime import datetime, timedelta
 
 import gspread
@@ -183,8 +184,8 @@ def read_rows(ws):
     rows = []
     for i, raw in enumerate(values[config.FIRST_DATA_ROW - 1:], start=config.FIRST_DATA_ROW):
         padded = raw + [""] * (len(config.HEADERS) - len(raw))
-        amazon = padded[config.COL["amazon_link"] - 1].strip()
-        ebay = padded[config.COL["ebay_link"] - 1].strip()
+        amazon = _fix_link(padded[config.COL["amazon_link"] - 1])
+        ebay = _fix_link(padded[config.COL["ebay_link"] - 1])
         if not amazon and not ebay:
             continue
         rows.append(
@@ -204,6 +205,28 @@ def read_rows(ws):
             }
         )
     return rows
+
+
+def _fix_link(raw: str) -> str:
+    """
+    Linki düzəldir: "amazon.com/Pack-Teflo" -> "https://www.amazon.com/Pack-Teflo"
+
+    Sheet-ə əl ilə yapışdırılan linklərdə bəzən "https://" olmur. Əvvəllər belə
+    sətirlər "XETA link yoxdur" alırdı, halbuki link əslində işləyirdi.
+    """
+    link = (raw or "").strip()
+    if not link:
+        return ""
+    if link.startswith(("http://", "https://")):
+        return link
+    if link.startswith("//"):
+        return "https:" + link
+    # Domenlə başlayırsa protokol əlavə edirik
+    if re.match(r"^(www\.)?(amazon|ebay)\.[a-z.]{2,8}/", link, re.I):
+        if not link.lower().startswith("www."):
+            link = "www." + link
+        return "https://" + link
+    return link
 
 
 def _to_int(text):

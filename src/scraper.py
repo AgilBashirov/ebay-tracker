@@ -548,7 +548,7 @@ def scrape_ebay_info(browser: Browser, url: str, api_mode: bool = False) -> dict
 # Ehtiyat kanal — pulsuz scraping API kreditləri
 # ---------------------------------------------------------------------------
 
-def fetch_via_fallback(url: str) -> str | None:
+def fetch_via_fallback(url: str, skip_first: bool = False) -> str | None:
     """
     Pulsuz scraping API kreditləri ilə səhifəni gətirir.
     Bu xidmətlər rezident proksi istifadə edir — Amazon bloklamır.
@@ -576,6 +576,9 @@ def fetch_via_fallback(url: str) -> str | None:
             )
         )
 
+    if skip_first and len(endpoints) > 1:
+        endpoints = endpoints[1:]
+
     for name, ep in endpoints:
         try:
             req = urllib.request.Request(
@@ -593,11 +596,32 @@ def fetch_via_fallback(url: str) -> str | None:
 
 
 def scrape_amazon_via_api(url: str) -> ScrapeResult:
-    """Yalnız API üzərindən oxuyur (birbaşa Amazon-a dəymir)."""
-    html = fetch_via_fallback(normalize_amazon_url(url))
+    """
+    Yalnız API üzərindən oxuyur (birbaşa Amazon-a dəymir).
+
+    Amazon bəzən proksi üzərindən NATAMAM səhifə qaytarır — qiymət JSON-u
+    olmur. Belə halda ikinci provayderlə bir dəfə təkrar cəhd edirik.
+    Bu, "Amazon qiyməti yoxdur" yalanış xətalarının qarşısını alır.
+    """
+    clean = normalize_amazon_url(url)
+
+    html = fetch_via_fallback(clean)
     if html is None:
         raise RuntimeError("API kanalı cavab vermədi (kredit bitib ola bilər)")
-    return parse_amazon(html)
+
+    result = parse_amazon(html)
+
+    # Qiymət tapılmayıb, amma məhsul açıq-aydın "stokda deyil" də deyil
+    # → səhifə natamam gəlib. İkinci provayderlə təkrar.
+    if result.price is None and result.in_stock and config.SCRAPINGBEE_KEY:
+        print("    🔄 Qiymət tapılmadı — ikinci provayderlə təkrar cəhd")
+        html2 = fetch_via_fallback(clean, skip_first=True)
+        if html2:
+            retry = parse_amazon(html2)
+            if retry.price is not None:
+                return retry
+
+    return result
 
 
 # ---------------------------------------------------------------------------
