@@ -2,8 +2,11 @@ name: Qiymet Izleme
 
 on:
   schedule:
-    # Hər saat başı işləyir. Yük saatlara yayılır — bloklamanın qarşısını alır.
+    # Hər saat başı yoxlama. GitHub cron "ən yaxşı cəhd" prinsipi ilə işləyir —
+    # bəzi saatlar ötürülə bilər, sistem bunu özü kompensasiya edir.
     - cron: "7 * * * *"
+    # Gündə bir dəfə sağlamlıq hesabatı
+    - cron: "0 17 * * *"
   workflow_dispatch:
     inputs:
       batch_size:
@@ -21,9 +24,9 @@ jobs:
     timeout-minutes: 50
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
@@ -61,24 +64,17 @@ jobs:
   # Günün sonunda qısa sağlamlıq hesabatı
   health:
     runs-on: ubuntu-latest
-    if: github.event_name == 'schedule'
+    if: github.event.schedule == '0 17 * * *'
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
-      - name: Yalnız 21:00-da işlə
-        id: gate
-        run: |
-          HOUR=$(date -u +%H)
-          if [ "$HOUR" = "17" ]; then echo "run=yes" >> $GITHUB_OUTPUT; else echo "run=no" >> $GITHUB_OUTPUT; fi
       - name: Kitabxanalar
-        if: steps.gate.outputs.run == 'yes'
         run: pip install -r requirements.txt
       - name: Hesabat göndər
-        if: steps.gate.outputs.run == 'yes'
         env:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
