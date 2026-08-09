@@ -59,6 +59,17 @@ jobs:
           SCRAPERAPI_KEY: ${{ secrets.SCRAPERAPI_KEY }}
           SCRAPINGBEE_KEY: ${{ secrets.SCRAPINGBEE_KEY }}
           SCRAPE_METHOD: ${{ vars.SCRAPE_METHOD || 'auto' }}
+          EBAY_CLIENT_ID: ${{ secrets.EBAY_CLIENT_ID }}
+          EBAY_CLIENT_SECRET: ${{ secrets.EBAY_CLIENT_SECRET }}
+          EBAY_MARKETPLACE: ${{ vars.EBAY_MARKETPLACE || 'EBAY_US' }}
+          ALERT_ON_PRICE_RISE: ${{ vars.ALERT_ON_PRICE_RISE || '1' }}
+          ALERT_ON_LOW_QTY: ${{ vars.ALERT_ON_LOW_QTY || '1' }}
+          ALERT_ON_OUT_OF_STOCK: ${{ vars.ALERT_ON_OUT_OF_STOCK || '1' }}
+          ALERT_ON_LOW_MARGIN: ${{ vars.ALERT_ON_LOW_MARGIN || '0' }}
+          ALERT_ON_RESTOCK: ${{ vars.ALERT_ON_RESTOCK || '0' }}
+          EBAY_FVF_PCT: ${{ vars.EBAY_FVF_PCT || '13.6' }}
+          EBAY_AD_RATE_PCT: ${{ vars.EBAY_AD_RATE_PCT || '0' }}
+          SALES_TAX_PCT: ${{ vars.SALES_TAX_PCT || '10' }}
           CHECK_INTERVAL_DAYS: ${{ vars.CHECK_INTERVAL_DAYS || '1' }}
           EBAY_REFRESH_DAYS: ${{ vars.EBAY_REFRESH_DAYS || '10' }}
           EBAY_LOW_QTY: ${{ vars.EBAY_LOW_QTY || '2' }}

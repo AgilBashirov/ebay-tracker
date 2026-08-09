@@ -16,6 +16,7 @@ import traceback
 from datetime import datetime, timedelta
 
 import config
+import ebay_api
 import notify
 import pricing
 import scraper
@@ -165,7 +166,22 @@ def run(health_report: bool = False) -> int:
 
             ebay_price = row["ebay_price"]
             ebay_qty = row["ebay_qty"]
-            if sheets.should_fetch_ebay(row, data.in_stock, price_changed):
+
+            # --- eBay Browse API (varsa) — ən etibarlı və pulsuz mənbə ---
+            if ebay_api.is_configured():
+                info = ebay_api.fetch_item(row["ebay_link"])
+                if info:
+                    if info["price"]:
+                        ebay_price = info["price"]
+                    if info["qty"] is not None:
+                        ebay_qty = info["qty"]
+                    dq = "dəqiq" if info["qty_exact"] else f"≥{info['qty']}"
+                    print(f"    eBay API: qiymət {_m(ebay_price)} · "
+                          f"say {ebay_qty} ({dq}) · {info['status']}")
+                else:
+                    print("    ⚠️  eBay API cavab vermədi — sheet dəyəri saxlanılır")
+
+            elif sheets.should_fetch_ebay(row, data.in_stock, price_changed):
                 if not api_mode:
                     scraper.polite_delay(api_mode)
                 info = scraper.scrape_ebay_info(

@@ -216,6 +216,18 @@ EBAY_PRICE_SOURCE = os.environ.get("EBAY_PRICE_SOURCE", "scrape")
 # Sizin öz sayınızı bilməyiniz bizim təxminimizdən qat-qat dəqiqdir.
 EBAY_QTY_SOURCE = os.environ.get("EBAY_QTY_SOURCE", "sheet").strip().lower()
 
+# ---------------------------------------------------------------------------
+# eBay BROWSE API (ən etibarlı mənbə — scraping-i əvəz edir)
+# ---------------------------------------------------------------------------
+# Açarlar varsa, eBay qiyməti VƏ qalıq sayı birbaşa API-dən alınır:
+#   • pulsuz (gündə 5,000 sorğu)
+#   • istifadəçi icazəsi (OAuth razılıq ekranı) tələb etmir
+#   • ScraperAPI krediti xərclənmir
+# developer.ebay.com -> Application Keys -> Production
+EBAY_CLIENT_ID = os.environ.get("EBAY_CLIENT_ID", "")       # App ID (Client ID)
+EBAY_CLIENT_SECRET = os.environ.get("EBAY_CLIENT_SECRET", "")  # Cert ID (Client Secret)
+EBAY_MARKETPLACE = os.environ.get("EBAY_MARKETPLACE", "EBAY_US")
+
 # eBay səhifəsi neçə gündən bir tam yenilənsin.
 # Öz listinginizin qiymətini siz təyin etdiyiniz üçün tez-tez oxumağa ehtiyac yoxdur —
 # bu, API kreditinə qənaət edir. Qalıq say azalanda və ya Amazon-da stok bitəndə
