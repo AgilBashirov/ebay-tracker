@@ -95,7 +95,13 @@ CHECK_INTERVAL_DAYS = float(os.environ.get("CHECK_INTERVAL_DAYS", "1"))
 
 
 def resolve_batch_size(total_products: int) -> int:
-    """Məhsul sayına görə bu işləmədə neçə məhsul yoxlanacağını qaytarır."""
+    """
+    Bu işləmədə maksimum neçə məhsul yoxlana bilər (LİMİT).
+
+    Faktiki say bundan az ola bilər — yalnız yoxlama vaxtı çatmış məhsullar
+    seçilir (bax: sheets.pick_batch). Limit sadəcə bir işləmənin çox uzun
+    çəkməməsi üçündür.
+    """
     import math
 
     if BATCH_SIZE != "auto":
@@ -106,9 +112,12 @@ def resolve_batch_size(total_products: int) -> int:
 
     if total_products <= 0:
         return AUTO_BATCH_MIN
+
+    # Nominal pay (cron gecikməsiz halda) — buna ehtiyat üçün 4 dəfə pay veririk,
+    # çünki GitHub cron-u tez-tez ötürür və növbə yığılır.
     slots = max(1.0, RUNS_PER_DAY * CHECK_INTERVAL_DAYS)
-    per_run = math.ceil(total_products / slots)
-    return max(AUTO_BATCH_MIN, min(AUTO_BATCH_MAX, per_run))
+    nominal = math.ceil(total_products / slots)
+    return max(AUTO_BATCH_MIN, min(AUTO_BATCH_MAX, nominal * 4))
 
 # Məhsullar arası təsadüfi gecikmə (saniyə). Aşağı salmayın — bloklamanın əsas səbəbi budur.
 DELAY_MIN_SEC = int(os.environ.get("DELAY_MIN_SEC", "8"))
@@ -145,7 +154,7 @@ EBAY_LOW_QTY = int(os.environ.get("EBAY_LOW_QTY", "2"))
 # "auto"   -> əvvəlcə birbaşa cəhd et, bloklama olsa API-yə keç (defolt)
 # "api"    -> həmişə API üzərindən (GitHub Actions üçün ən etibarlısı)
 # "direct" -> yalnız birbaşa (öz kompüterinizdə / rezident IP-də)
-SCRAPE_METHOD = os.environ.get("SCRAPE_METHOD", "auto").strip().lower()
+_scrape_method_raw = os.environ.get("SCRAPE_METHOD", "").strip().lower()
 
 # Pulsuz kredit verən scraping API-ləri (rezident proksi ilə işləyirlər).
 # Açar yoxdursa avtomatik ötürülür.
@@ -155,3 +164,23 @@ SCRAPINGBEE_KEY = os.environ.get("SCRAPINGBEE_KEY", "")
 
 def has_api_fallback() -> bool:
     return bool(SCRAPERAPI_KEY or SCRAPINGBEE_KEY)
+
+
+def _resolve_scrape_method() -> str:
+    """
+    SCRAPE_METHOD təyin edilməyibsə ağıllı defolt seçir.
+
+    GitHub Actions serverlərini Amazon istisnasız bloklayır — orada birbaşa
+    cəhd etmək hər işləmədə bir sorğunu və ~1 dəqiqəni boş yerə xərcləyir.
+    Ona görə CI mühitində API açarı varsa birbaşa "api" rejimi seçilir.
+    Öz kompüterinizdə (rezident IP) isə "auto" qalır.
+    """
+    if _scrape_method_raw in ("api", "direct", "auto"):
+        return _scrape_method_raw
+    in_ci = os.environ.get("GITHUB_ACTIONS", "").lower() == "true"
+    if in_ci and has_api_fallback():
+        return "api"
+    return "auto"
+
+
+SCRAPE_METHOD = _resolve_scrape_method()

@@ -266,31 +266,44 @@ def scrape_amazon(browser: Browser, url: str) -> ScrapeResult:
 # eBay
 # ---------------------------------------------------------------------------
 
+# DİQQƏT: eBay-in xam HTML-ində atributlar DIRNAQSIZ olur (class=x-price-primary).
+# Ona görə bütün nümunələrdə dırnaq ixtiyaridir: ["']?
 EBAY_PRICE_PATTERNS = [
-    r'"price"\s*:\s*\{\s*"value"\s*:\s*"?([\d.]+)',
-    r'itemprop="price"[^>]*content="([\d.]+)"',
-    r'id="prcIsum"[^>]*>\s*(?:US\s*)?\$([\d,]+\.\d{2})',
-    r'class="x-price-primary"[^>]*>.*?\$([\d,]+\.\d{2})',
-    r'"binPrice"\s*:\s*"?\$?([\d,]+\.\d{2})',
+    r'data-testid=["\']?x-price-primary["\']?[\s\S]{0,400}?\$\s*([\d,]+\.\d{2})',
+    r'class=["\']?x-price-primary["\']?[\s\S]{0,400}?\$\s*([\d,]+\.\d{2})',
+    r'"value"\s*:\s*\{\s*"value"\s*:\s*([\d.]+)\s*,\s*"currency"\s*:\s*"USD"',
+    r'id=["\']?prcIsum["\']?[^>]*>\s*(?:US\s*)?\$\s*([\d,]+\.\d{2})',
+    r'itemprop=["\']?price["\']?[^>]*content=["\']?([\d.]+)',
+    # Son çarə — səhifədəki ilk "US $..." dəyəri (adətən əsas qiymətdir)
+    r'US\s*\$\s*([\d,]+\.\d{2})',
 ]
 
 
 # Listinginizdəki qalıq say. "10 available", "More than 10 available",
 # "Last one" və s. formatlarında olur.
 EBAY_QTY_PATTERNS = [
-    r'class="x-quantity__availability"[^>]*>.*?(?:<span[^>]*>)?\s*(More than [\d,]+|[\d,]+)\s+available',
-    r'id="qtySubTxt"[^>]*>.*?(More than [\d,]+|[\d,]+)\s+available',
+    r'class=["\']?x-quantity__availability["\']?[\s\S]{0,300}?(More than [\d,]+|[\d,]+)\s+available',
+    r'id=["\']?qtySubTxt["\']?[\s\S]{0,200}?(More than [\d,]+|[\d,]+)\s+available',
+    r'>\s*(More than [\d,]+|[\d,]+)\s+available\s*<',
     r'"quantityAvailable"\s*:\s*(\d+)',
     r'"availableQuantity"\s*:\s*(\d+)',
-    r'>\s*(More than [\d,]+|[\d,]+)\s+available\s*<',
+    r'(More than [\d,]+|[\d,]+)\s+available',
 ]
 
-EBAY_SOLDOUT_MARKERS = [
-    "out of stock",
+# Listinqin bağlı olduğunu bildirən açıq siqnallar.
+# VACİB: bunlar bütün HTML-də deyil, YALNIZ dar sahədə axtarılır — çünki
+# "out of stock" ifadəsi məhsulun bir variantı üçün JSON blokunda da keçir
+# və bütöv səhifə axtarışı işləyən listinqi səhvən "bağlı" göstərir.
+EBAY_ENDED_MARKERS = [
     "this listing has ended",
     "this listing was ended",
-    "no longer available",
-    "item is out of stock",
+    "bidding has ended",
+    "listing ended",
+]
+
+EBAY_SOLDOUT_NARROW = [
+    "out of stock",
+    "sold out",
 ]
 
 
@@ -307,29 +320,57 @@ def _parse_ebay_price(html: str) -> float | None:
     return None
 
 
+def _ebay_qty_region(html: str) -> str:
+    """
+    Say/mövcudluq məlumatının olduğu dar sahəni qaytarır.
+    Səhifənin qalan hissəsindəki variant JSON-ları yanlış nəticə verir.
+    """
+    for pat in (
+        r'class=["\']?x-quantity__availability["\']?',
+        r'id=["\']?qtySubTxt["\']?',
+        r'id=["\']?qtySubTxtGrp["\']?',
+        r'class=["\']?x-buybox["\']?',
+    ):
+        m = re.search(pat, html, re.I)
+        if m:
+            return html[m.start(): m.start() + 1500]
+    return ""
+
+
 def _parse_ebay_qty(html: str) -> int | None:
     """
     eBay listinginizdəki qalıq sayı qaytarır.
-    0  -> satışda deyil / bitib
+    0    -> satışda deyil / bitib
     None -> oxuna bilmədi (qərar verərkən "naməlum" kimi baxılır)
+
+    Sıra vacibdir: əvvəlcə MÜSBƏT siqnal (N available) axtarılır.
+    Yalnız o tapılmayanda "bağlıdır" qərarı verilir — belə ki, məhsulun
+    bir variantının bitməsi bütün listinqi bağlı göstərməsin.
     """
     low = html.lower()
 
-    if any(m in low for m in EBAY_SOLDOUT_MARKERS):
+    # 1) Açıq şəkildə bitmiş listinq (bütün səhifədə axtarmaq təhlükəsizdir —
+    #    bu ifadələr variant JSON-larında keçmir)
+    if any(m in low for m in EBAY_ENDED_MARKERS):
         return 0
 
-    if re.search(r"\blast one\b", low):
-        return 1
-
+    # 2) Müsbət siqnal: "N available" / "More than N available"
     for pat in EBAY_QTY_PATTERNS:
         m = re.search(pat, html, re.S | re.I)
         if m:
-            raw = m.group(1)
-            digits = re.sub(r"[^\d]", "", raw)
+            digits = re.sub(r"[^\d]", "", m.group(1))
             if digits:
-                qty = int(digits)
-                # "More than 10 available" -> ən azı 11, biz 10-dan çox kimi qeyd edirik
-                return qty
+                return int(digits)
+
+    # 3) "Last one"
+    if re.search(r"\blast one\b", low):
+        return 1
+
+    # 4) Yalnız indi — dar sahədə "out of stock" axtarırıq
+    region = _ebay_qty_region(html).lower()
+    if region and any(m in region for m in EBAY_SOLDOUT_NARROW):
+        return 0
+
     return None
 
 
@@ -419,8 +460,17 @@ def scrape_amazon_via_api(url: str) -> ScrapeResult:
 
 # ---------------------------------------------------------------------------
 
-def polite_delay():
-    time.sleep(random.uniform(config.DELAY_MIN_SEC, config.DELAY_MAX_SEC))
+def polite_delay(api_mode: bool = False):
+    """
+    Sorğular arası gecikmə.
+    API rejimində uzun gecikməyə ehtiyac yoxdur — provayder özü proksi rotasiyası
+    edir və bloklama riski bizim tempimizdən asılı deyil. Bu, işləmə müddətini
+    kəskin qısaldır və bir işləmədə daha çox məhsul yoxlamağa imkan verir.
+    """
+    if api_mode:
+        time.sleep(random.uniform(0.5, 2.0))
+    else:
+        time.sleep(random.uniform(config.DELAY_MIN_SEC, config.DELAY_MAX_SEC))
 
 
 def _clean(text: str) -> str:

@@ -219,23 +219,52 @@ def _to_float(text):
         return None
 
 
-def pick_batch(rows, batch_size):
-    """
-    Ən köhnə yoxlanmış sətirləri seçir — beləliklə yük saatlara yayılır
-    və 500 məhsul da növbə ilə tam əhatə olunur.
-    """
-    def sort_key(r):
-        if not r["last_check"]:
-            return datetime.min
+def _parse_last_check(row):
+    raw = row.get("last_check") or ""
+    for fmt, length in (("%Y-%m-%d %H:%M", 16), ("%Y-%m-%d", 10)):
         try:
-            return datetime.strptime(r["last_check"][:16], "%Y-%m-%d %H:%M")
+            return datetime.strptime(raw[:length], fmt)
         except ValueError:
-            try:
-                return datetime.strptime(r["last_check"][:10], "%Y-%m-%d")
-            except ValueError:
-                return datetime.min
+            continue
+    return None
 
-    return sorted(rows, key=sort_key)[:batch_size]
+
+def pick_batch(rows, limit, interval_days=None):
+    """
+    Yalnız YOXLAMA VAXTI ÇATMIŞ məhsulları seçir (ən köhnədən başlayaraq).
+
+    Niyə belə: GitHub cron "ən yaxşı cəhd" prinsipi ilə işləyir — bəzən saatda
+    bir dəfə, bəzən 3 saatda bir işə düşür. Sabit batch ölçüsü ilə işləməlar
+    ötürüləndə məhsullar geri qalırdı. Vaxtı çatanları seçmək bunu özü
+    kompensasiya edir: işləmələr seyrək olsa növbə böyüyür, tez-tez olsa kiçilir.
+    Nəticədə gündəlik yoxlama sayı işləmə tezliyindən asılı olmur.
+    """
+    if interval_days is None:
+        interval_days = config.CHECK_INTERVAL_DAYS
+
+    now = datetime.utcnow()
+    threshold = timedelta(days=interval_days)
+
+    due = []
+    for r in rows:
+        last = _parse_last_check(r)
+        if last is None or (now - last) >= threshold:
+            due.append((last or datetime.min, r))
+
+    due.sort(key=lambda pair: pair[0])
+    return [r for _, r in due[:limit]]
+
+
+def count_due(rows, interval_days=None) -> int:
+    if interval_days is None:
+        interval_days = config.CHECK_INTERVAL_DAYS
+    now = datetime.utcnow()
+    threshold = timedelta(days=interval_days)
+    return sum(
+        1 for r in rows
+        if (_parse_last_check(r) is None)
+        or (now - _parse_last_check(r)) >= threshold
+    )
 
 
 def needs_ebay_refresh(row):

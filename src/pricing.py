@@ -102,7 +102,12 @@ def classify(
 
     # Qiymət oxuna bilməyibsə bu stok problemi deyil — səhv bildiriş göndərməyək.
     if amazon_new is None:
-        return "XETA qiymət oxunmadı", False
+        return "XETA Amazon qiyməti yoxdur", False
+
+    # eBay qiyməti bilinmirsə marja hesablana bilmir — bunu "OK" saymaq
+    # yanlışdır, çünki əslində zərərdə ola bilərsiniz.
+    if ebay_price is None:
+        return "XETA eBay qiyməti yoxdur", False
 
     if amazon_old is not None and amazon_new is not None:
         diff = amazon_new - amazon_old

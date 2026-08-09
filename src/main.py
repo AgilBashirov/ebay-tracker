@@ -32,12 +32,22 @@ def run(health_report: bool = False) -> int:
     all_rows = sheets.read_rows(ws)
     print(f"Sheet-də cəmi {len(all_rows)} məhsul var.")
 
-    batch_size = config.resolve_batch_size(len(all_rows))
-    mode = "avtomatik" if config.BATCH_SIZE == "auto" else "əl ilə təyin edilmiş"
-    print(f"Batch ölçüsü ({mode}): {batch_size} məhsul/işləmə "
-          f"→ gündəlik tutum {batch_size * config.RUNS_PER_DAY}")
+    limit = config.resolve_batch_size(len(all_rows))
 
-    batch = sheets.pick_batch(all_rows, batch_size)
+    # BATCH_SIZE əl ilə rəqəm kimi verilibsə (Run workflow → "54"), bu, məcburi
+    # işləmədir: vaxt intervalına baxmadan ən köhnələrdən başlayaraq yoxlayırıq.
+    forced = config.BATCH_SIZE != "auto"
+
+    if forced:
+        print(f"⚡ Məcburi işləmə — vaxt intervalı nəzərə alınmır. Limit: {limit}")
+        batch = sheets.pick_batch(all_rows, limit, interval_days=0)
+    else:
+        due = sheets.count_due(all_rows)
+        print(f"Yoxlama vaxtı çatıb: {due} məhsul "
+              f"(interval: hər {config.CHECK_INTERVAL_DAYS} gündə bir)")
+        print(f"Bu işləmənin limiti: {limit}")
+        batch = sheets.pick_batch(all_rows, limit)
+
     print(f"Bu işləmədə yoxlanacaq: {len(batch)} məhsul.\n")
 
     if not batch:
@@ -103,21 +113,21 @@ def run(health_report: bool = False) -> int:
                     if consecutive_blocks >= config.BLOCK_ABORT_THRESHOLD:
                         print("\n🛑 Ardıcıl bloklama həddi keçildi — işləmə dayandırılır.")
                         break
-                    scraper.polite_delay()
+                    scraper.polite_delay(api_mode)
                     continue
 
             except scraper.NotFoundError:
                 print("    ❌ Səhifə tapılmadı (404)")
                 results.append({**_base(row), "status": "XETA link ölüdür"})
                 stats["error"] += 1
-                scraper.polite_delay()
+                scraper.polite_delay(api_mode)
                 continue
 
             except Exception as e:
                 print(f"    ❌ Xəta: {e}")
                 results.append({**_base(row), "status": "XETA"})
                 stats["error"] += 1
-                scraper.polite_delay()
+                scraper.polite_delay(api_mode)
                 continue
 
             processed += 1
@@ -129,7 +139,7 @@ def run(health_report: bool = False) -> int:
             ebay_qty = row["ebay_qty"]
             if sheets.should_fetch_ebay(row, data.in_stock):
                 if not api_mode:
-                    scraper.polite_delay()
+                    scraper.polite_delay(api_mode)
                 info = scraper.scrape_ebay_info(
                     browser, row["ebay_link"], api_mode=api_mode
                 )
@@ -193,7 +203,7 @@ def run(health_report: bool = False) -> int:
                 )
 
             if idx < len(batch):
-                scraper.polite_delay()
+                scraper.polite_delay(api_mode)
 
     # --- Sheet-i yenilə ---
     print(f"\nSheet yenilənir ({len(results)} sətir)...")
@@ -209,12 +219,14 @@ def run(health_report: bool = False) -> int:
     if block_reason:
         remaining = len(batch) - processed
         lost = sum(1 for r in results if r.get("status") == "BLOKLANDI")
-        # Ehtiyat kanal hər şeyi əhatə edibsə, səssiz məlumat mesajı göndəririk —
-        # hər işləmədə həyəcanlı bildiriş gəlməsin.
-        notify.send(
-            notify.format_blocked(processed, remaining, block_reason, lost),
-            silent=(lost == 0),
-        )
+        if lost > 0:
+            # Yalnız məhsul həqiqətən oxuna bilməyəndə bildiriş göndəririk.
+            notify.send(notify.format_blocked(processed, remaining, block_reason, lost))
+        else:
+            # Ehtiyat kanal hər şeyi əhatə edib — bu, gündəlik normal haldır,
+            # Telegram-ı doldurmağa dəyməz. Yalnız loga yazılır.
+            print("ℹ️  Amazon birbaşa girişi bloklandı, API kanalı ilə tamamlandı "
+                  "(itki yoxdur — bildiriş göndərilmir).")
 
     if health_report:
         notify.send(notify.format_health(stats), silent=True)
