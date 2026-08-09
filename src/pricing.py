@@ -79,14 +79,17 @@ def classify(
     in_stock: bool,
     margin_pct: float | None,
     ebay_qty: int | None = None,
+    amazon_qty: int | None = None,
 ) -> tuple[str, bool]:
     """
     (status_etiketi, bildiriş_lazımdır) qaytarır.
 
-    eBay qalıq sayı nəzərə alınır:
-      eBay 0  + Amazon yoxdur -> bildiriş YOX (listing artıq bağlıdır, tədbir lazım deyil)
-      eBay 0  + Amazon var    -> bildiriş VAR (yenidən satışa çıxarmaq imkanı)
-      eBay >0 + Amazon yoxdur -> bildiriş VAR (təcili: listingi dayandırın)
+    Say məntiqi:
+      eBay 0  + Amazon yoxdur       -> bildiriş YOX (listing onsuz da bağlıdır)
+      eBay 0  + Amazon var          -> bildiriş VAR (yenidən satışa çıxarmaq imkanı)
+      eBay >0 + Amazon yoxdur       -> bildiriş VAR (təcili: listingi dayandırın)
+      Amazon sayı < eBay sayınız    -> bildiriş VAR (sifarişi çatdıra bilməzsiniz)
+      Amazon sayı >= eBay sayınız   -> bildiriş YOX (problem yoxdur)
     """
     ebay_closed = ebay_qty is not None and ebay_qty <= 0
 
@@ -99,6 +102,11 @@ def classify(
     # Amazon-da var, sizin listing bağlıdır → satış imkanı
     if ebay_closed:
         return "TEKRAR AC", True
+
+    # Amazon-da qalan say sizin eBay sayınızdan azdırsa — sifarişi çatdıra bilməzsiniz.
+    # amazon_qty yalnız "Only N left" göründükdə bilinir; None olması "bol var" deməkdir.
+    if amazon_qty is not None and ebay_qty is not None and amazon_qty < ebay_qty:
+        return "AZ STOK", True
 
     # Qiymət oxuna bilməyibsə bu stok problemi deyil — səhv bildiriş göndərməyək.
     if amazon_new is None:

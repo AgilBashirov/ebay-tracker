@@ -163,7 +163,8 @@ def run(health_report: bool = False) -> int:
             m_usd, m_pct = pricing.margin(ebay_price, amazon_new)
             suggested = pricing.suggest_ebay_price(ebay_price, amazon_old, amazon_new)
             status, should_alert = pricing.classify(
-                ebay_price, amazon_old, amazon_new, data.in_stock, m_pct, ebay_qty
+                ebay_price, amazon_old, amazon_new, data.in_stock, m_pct,
+                ebay_qty, data.qty
             )
 
             print(
@@ -176,6 +177,7 @@ def run(health_report: bool = False) -> int:
                 "product_name": data.name or row["product_name"],
                 "ebay_price": ebay_price,
                 "ebay_qty": ebay_qty,
+                "amazon_qty": data.qty,
                 "amazon_old": amazon_old,
                 "amazon_new": amazon_new,
                 "stock": data.stock,

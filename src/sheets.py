@@ -365,6 +365,7 @@ def _apply_row_colors(ws, results):
         "AZ":        {"red": 1.00, "green": 0.97, "blue": 0.80},  # sarı (AZ MARJA)
         "STOK":      {"red": 0.99, "green": 0.85, "blue": 0.85},  # qırmızı (STOK YOX)
         "STOK_PASSIV": {"red": 0.96, "green": 0.96, "blue": 0.96},  # solğun (eBay bağlı)
+        "AZ_STOK":   {"red": 1.00, "green": 0.89, "blue": 0.78},  # tünd narıncı
         "TEKRAR":    {"red": 0.85, "green": 0.93, "blue": 0.99},  # mavi (yenidən aç)
         "XETA":      {"red": 0.93, "green": 0.93, "blue": 0.93},  # boz
         "BLOKLANDI": {"red": 0.91, "green": 0.89, "blue": 0.98},  # bənövşəyi
@@ -375,6 +376,8 @@ def _apply_row_colors(ws, results):
         key = status.split()[0]
         if key == "STOK" and "bağlı" in status:
             key = "STOK_PASSIV"
+        elif status.startswith("AZ STOK"):
+            key = "AZ_STOK"
         color = palette.get(key, palette["OK"])
         requests.append(
             {

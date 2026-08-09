@@ -70,27 +70,53 @@ def _money(v):
     return "—" if v is None else f"${v:,.2f}"
 
 
+REASON_TITLES = {
+    "STOK YOX":  "🔴 AMAZON-DA STOK BİTİB",
+    "TEKRAR AC": "🟢 AMAZON-A QAYIDIB — LİSTİNGİ AÇIN",
+    "AZ STOK":   "📦 AMAZON-DA SAY AZALIB",
+    "QIYMET+":   "📈 AMAZON QİYMƏTİ ARTDI",
+    "QIYMET-":   "📉 AMAZON QİYMƏTİ DÜŞDÜ",
+    "AZ MARJA":  "⚠️ MARJA HƏDDİN ALTINA DÜŞDÜ",
+}
+
+
+def _reason_title(status: str) -> str:
+    for key, title in REASON_TITLES.items():
+        if status.startswith(key):
+            return title
+    return "ℹ️ DƏYİŞİKLİK"
+
+
 def format_alerts(alerts: list[dict]) -> str:
     """alerts: main.py-dan gələn dəyişiklik siyahısı."""
-    lines = ["<b>⚠️ Qiymət / stok dəyişikliyi</b>", ""]
+    lines = [f"<b>Bildiriş — {len(alerts)} məhsul</b>", ""]
 
     for a in alerts:
         name = _e(a.get("product_name") or "Adsız məhsul")
         if len(name) > 70:
             name = name[:67] + "..."
 
+        # Hər mesaj niyə gəldiyini açıq yazır
+        lines.append(_reason_title(a["status"]))
         lines.append(f"<b>{name}</b>")
 
-        if a["status"].startswith("STOK YOX"):
-            lines.append("🔴 <b>Amazon-da STOK BİTİB</b>")
-            lines.append(f"   Stok: {_e(a.get('stock'))}")
+        if a["status"].startswith("AZ STOK"):
+            aq, eq = a.get("amazon_qty"), a.get("ebay_qty")
+            lines.append(f"   Amazon-da qalıb: <b>{aq}</b> ədəd")
+            lines.append(f"   Sizin eBay sayınız: <b>{eq}</b> ədəd")
+            lines.append(f"   ⚠️ {eq - aq} sifarişi çatdıra bilməzsiniz")
+            lines.append(f"   💡 eBay sayını <b>{aq}</b>-ə salın")
+            if a.get("amazon_new") is not None:
+                lines.append(f"   Amazon qiyməti: {_money(a['amazon_new'])}")
+
+        elif a["status"].startswith("STOK YOX"):
+            lines.append(f"   Amazon: {_e(a.get('stock')) or 'əlçatmaz'}")
             qty = a.get("ebay_qty")
             if qty:
                 lines.append(f"   ⚠️ eBay-də hələ <b>{qty}</b> ədəd satışdadır")
             lines.append("   💡 eBay listingini dayandırın və ya başqa təchizatçı tapın")
 
         elif a["status"].startswith("TEKRAR AC"):
-            lines.append("🟢 <b>Amazon-da yenidən STOKDADIR</b>")
             lines.append("   eBay listinginiz bağlıdır (say: 0)")
             if a.get("amazon_new") is not None:
                 lines.append(f"   Amazon qiyməti: <b>{_money(a['amazon_new'])}</b>")
@@ -105,28 +131,31 @@ def format_alerts(alerts: list[dict]) -> str:
             old, new = a.get("amazon_old"), a.get("amazon_new")
             if old is not None and new is not None:
                 diff = new - old
-                arrow = "📈" if diff > 0 else "📉"
                 pct = (diff / old * 100) if old else 0
                 lines.append(
-                    f"{arrow} Amazon: {_money(old)} → <b>{_money(new)}</b> "
+                    f"   Amazon: {_money(old)} → <b>{_money(new)}</b> "
                     f"({'+' if diff > 0 else ''}{diff:,.2f} / {pct:+.1f}%)"
                 )
-            else:
-                lines.append(f"Amazon: <b>{_money(new)}</b>")
+            elif new is not None:
+                # İlk yoxlamadır, müqayisə üçün əvvəlki qiymət yoxdur
+                lines.append(f"   Amazon: <b>{_money(new)}</b> <i>(ilk yoxlama)</i>")
 
             ebay = a.get("ebay_price")
             m_usd, m_pct = a.get("margin_usd"), a.get("margin_pct")
             if ebay is not None:
-                lines.append(f"🏷 Sizin eBay: {_money(ebay)}")
+                lines.append(f"   Sizin eBay: {_money(ebay)}")
             if m_usd is not None:
-                warn = " ⚠️" if (m_pct is not None and m_pct < config.MARGIN_ALERT_PCT) else ""
-                lines.append(f"💰 Marja: {_money(m_usd)} ({m_pct:.1f}%){warn}")
+                lines.append(f"   Marja: <b>{_money(m_usd)}</b> ({m_pct:.1f}%)")
+                if a["status"].startswith("AZ MARJA"):
+                    lines.append(
+                        f"   ⚠️ Hədd {config.MARGIN_ALERT_PCT:.0f}%-dir — "
+                        f"bu məhsulda qazanc azdır"
+                    )
 
             sug = a.get("suggested_ebay")
             if sug is not None and ebay is not None and abs(sug - ebay) >= 0.01:
                 lines.append(
-                    f"💡 <b>Tövsiyə: eBay qiymətini {_money(sug)} edin</b> "
-                    f"(marjanı qorumaq üçün)"
+                    f"   💡 <b>Tövsiyə: eBay qiymətini {_money(sug)} edin</b>"
                 )
 
         links = []

@@ -64,6 +64,9 @@ class ScrapeResult:
     stock: str = ""
     name: str = ""
     in_stock: bool = True
+    # Amazon-da qalan say. Yalnız "Only N left in stock" göründükdə bilinir.
+    # None = say açıqlanmayıb (adətən bol olduğu üçün).
+    qty: int | None = None
     notes: list = field(default_factory=list)
 
 
@@ -167,11 +170,10 @@ NAME_PATTERNS = [
     r'<title>\s*(?:Amazon\.com\s*:\s*)?(.*?)\s*(?::|</title>)',
 ]
 
-STOCK_PATTERNS = [
-    r'id="availability"[^>]*>.*?<span[^>]*>\s*(.*?)\s*</span>',
-    r'(Only \d+ left in stock[^<]*)',
-    r'>\s*(In Stock)\s*<',
-]
+# DİQQƏT: xam HTML-də stok mətni birbaşa <div id="availability"> içində olur,
+# <span> içində DEYİL. Həmçinin "Only N left in stock" ifadəsi səhifənin başqa
+# yerlərində DİGƏR məhsullar üçün də keçir — ona görə yalnız bu element oxunur.
+AVAILABILITY_BLOCK = r'id=["\']?availability["\']?[^>]*>([\s\S]{0,400}?)</div>'
 
 
 def parse_amazon(html: str) -> ScrapeResult:
@@ -201,11 +203,22 @@ def parse_amazon(html: str) -> ScrapeResult:
             except ValueError:
                 continue
 
-    for pat in STOCK_PATTERNS:
-        m = re.search(pat, html, re.S | re.I)
-        if m:
-            res.stock = _clean(m.group(1))[:80]
-            break
+    # Stok mətni — yalnız availability elementindən
+    m = re.search(AVAILABILITY_BLOCK, html, re.S | re.I)
+    if m:
+        text = _clean(m.group(1))
+        # Bəzən element boş olur, sonrakı təkrarı yoxlayaq
+        if not text:
+            for m2 in re.finditer(AVAILABILITY_BLOCK, html, re.S | re.I):
+                text = _clean(m2.group(1))
+                if text:
+                    break
+        res.stock = text[:80]
+
+    # Qalan say — YALNIZ stok mətnindən (səhifənin qalanı digər məhsullara aiddir)
+    qm = re.search(r"only\s+(\d+)\s+left", res.stock, re.I)
+    if qm:
+        res.qty = int(qm.group(1))
 
     # ---- Stok qərarı ----
     # VACİB: OOS markerlərini YALNIZ #availability mətnində axtarırıq.
