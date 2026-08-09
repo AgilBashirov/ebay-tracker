@@ -30,12 +30,13 @@ COL = {
     "last_check":    13,   # M
     "next_check":    14,   # N  <- növbəti yoxlama vaxtı (kredit qənaəti)
     "status":        15,   # O
+    "auto":          16,   # P  <- avtomatik dəyişikliyə icazə (siz yazırsınız)
 }
 HEADERS = [
     "eBay Link", "Amazon Link", "Məhsul Adı", "eBay Qiymətim", "eBay Say",
     "Amazon (əvvəlki)", "Amazon (indiki)", "Stok",
     "eBay Haqqı", "Marja $", "Marja %", "Tövsiyə eBay",
-    "Son Yoxlama", "Növbəti Yoxlama", "Status",
+    "Son Yoxlama", "Növbəti Yoxlama", "Status", "Avto",
 ]
 FIRST_DATA_ROW = 2
 
@@ -227,6 +228,29 @@ EBAY_QTY_SOURCE = os.environ.get("EBAY_QTY_SOURCE", "sheet").strip().lower()
 EBAY_CLIENT_ID = os.environ.get("EBAY_CLIENT_ID", "")       # App ID (Client ID)
 EBAY_CLIENT_SECRET = os.environ.get("EBAY_CLIENT_SECRET", "")  # Cert ID (Client Secret)
 EBAY_MARKETPLACE = os.environ.get("EBAY_MARKETPLACE", "EBAY_US")
+
+# ---------------------------------------------------------------------------
+# eBay LİSTİNQİNƏ YAZMA (Trading API) — Amazon-da stok bitəndə sayı 0 etmək
+# ---------------------------------------------------------------------------
+# Application Keys -> Production -> Dev ID
+EBAY_DEV_ID = os.environ.get("EBAY_DEV_ID", "")
+# Application Keys -> User Tokens (eBay Sign-in) -> Production -> token
+EBAY_AUTH_TOKEN = os.environ.get("EBAY_AUTH_TOKEN", "")
+
+# Amazon-da stok bitəndə eBay sayını avtomatik 0 etmək.
+AUTO_ZERO_QTY = _flag("AUTO_ZERO_QTY", False)
+
+# QURU REJİM — defolt AÇIQ. Nə ediləcəyini yazır, amma HEÇ NƏYİ dəyişmir.
+# Bir neçə gün nəticələrə baxıb əmin olandan sonra "0" edin.
+AUTO_DRY_RUN = _flag("AUTO_DRY_RUN", True)
+
+# Sətir üzrə icazə: P sütununda bu dəyərlərdən biri olmalıdır.
+AUTO_ALLOW_VALUES = {"beli", "bəli", "he", "hə", "yes", "y", "1", "true", "var", "ok"}
+
+
+def auto_allowed(cell_value: str) -> bool:
+    """Sheet-in P sütunundakı dəyər avtomatik dəyişikliyə icazə verirmi?"""
+    return str(cell_value or "").strip().lower() in AUTO_ALLOW_VALUES
 
 # eBay səhifəsi neçə gündən bir tam yenilənsin.
 # Öz listinginizin qiymətini siz təyin etdiyiniz üçün tez-tez oxumağa ehtiyac yoxdur —

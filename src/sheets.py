@@ -105,6 +105,7 @@ def apply_layout(ws):
         13: 115,  # M Son Yoxlama
         14: 115,  # N Növbəti Yoxlama
         15: 150,  # O Status
+        16: 70,   # P Avto
     }
     for col, px in widths.items():
         reqs.append({
@@ -147,7 +148,7 @@ def apply_layout(ws):
     align(6, 7, "RIGHT")     # F-G Amazon qiymətləri
     align(8, 8, "LEFT")      # H stok mətni
     align(9, 12, "RIGHT")    # I-L haqq, marja, təklif
-    align(13, 15, "CENTER")  # M-O tarixlər + status
+    align(13, 16, "CENTER")  # M-P tarixlər, status, avto
 
     # ---- Status sütunu qalın ----
     reqs.append({
@@ -202,6 +203,7 @@ def read_rows(ws):
                 "last_check": padded[config.COL["last_check"] - 1].strip(),
                 "next_check": padded[config.COL["next_check"] - 1].strip(),
                 "prev_status": padded[config.COL["status"] - 1].strip(),
+                "auto": padded[config.COL["auto"] - 1].strip(),
             }
         )
     return rows

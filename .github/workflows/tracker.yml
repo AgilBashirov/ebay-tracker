@@ -62,6 +62,10 @@ jobs:
           EBAY_CLIENT_ID: ${{ secrets.EBAY_CLIENT_ID }}
           EBAY_CLIENT_SECRET: ${{ secrets.EBAY_CLIENT_SECRET }}
           EBAY_MARKETPLACE: ${{ vars.EBAY_MARKETPLACE || 'EBAY_US' }}
+          EBAY_DEV_ID: ${{ secrets.EBAY_DEV_ID }}
+          EBAY_AUTH_TOKEN: ${{ secrets.EBAY_AUTH_TOKEN }}
+          AUTO_ZERO_QTY: ${{ vars.AUTO_ZERO_QTY || '0' }}
+          AUTO_DRY_RUN: ${{ vars.AUTO_DRY_RUN || '1' }}
           ALERT_ON_PRICE_RISE: ${{ vars.ALERT_ON_PRICE_RISE || '1' }}
           ALERT_ON_LOW_QTY: ${{ vars.ALERT_ON_LOW_QTY || '1' }}
           ALERT_ON_OUT_OF_STOCK: ${{ vars.ALERT_ON_OUT_OF_STOCK || '1' }}

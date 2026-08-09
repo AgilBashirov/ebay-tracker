@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 
 import config
 import ebay_api
+import ebay_write
 import notify
 import pricing
 import scraper
@@ -74,6 +75,7 @@ def run(health_report: bool = False) -> int:
     block_reason = None
     processed = 0
     ebay_fetches = 0
+    auto_actions = []
 
     # API rejimi: birbaşa Amazon-a dəymirik.
     # "api" seçilibsə əvvəldən, "auto"da isə ilk bloklamadan sonra aktivləşir.
@@ -253,6 +255,27 @@ def run(health_report: bool = False) -> int:
             else:
                 stats["changed"] += 1
 
+            # --- Avtomatik sayı sıfırlama (Amazon-da stok bitibsə) ---
+            if (reason == pricing.REASON_OUT_OF_STOCK
+                    and config.AUTO_ZERO_QTY
+                    and ebay_write.is_configured()
+                    and config.auto_allowed(row.get("auto"))):
+                item_id = ebay_api.extract_item_id(row["ebay_link"])
+                res = ebay_write.zero_out(item_id, ebay_qty, config.AUTO_DRY_RUN)
+                if res["done"]:
+                    ebay_qty = 0
+                    record["ebay_qty"] = 0
+                    print(f"    ✅ eBay sayı 0 edildi ({item_id})")
+                elif res["skipped"]:
+                    print(f"    ⏭  Sayı sıfırlamadım: {res['skipped']}")
+                else:
+                    print(f"    🧪 {res['message']}")
+                auto_actions.append({
+                    "name": record["product_name"], "item_id": item_id,
+                    "qty_before": row.get("ebay_qty"),
+                    **res,
+                })
+
             if should_alert:
                 alerts.append(
                     {
@@ -273,6 +296,9 @@ def run(health_report: bool = False) -> int:
     if alerts:
         print(f"Telegram-a {len(alerts)} bildiriş göndərilir...")
         notify.send(notify.format_alerts(alerts))
+
+    if auto_actions:
+        notify.send(notify.format_auto_actions(auto_actions, config.AUTO_DRY_RUN))
     else:
         print("Dəyişiklik yoxdur — Telegram bildirişi göndərilmir.")
 
@@ -321,6 +347,7 @@ def _base(row):
         "margin_pct": None,
         "suggested_ebay": None,
         "ebay_fee": None,
+        "auto": row.get("auto", ""),
     }
 
 

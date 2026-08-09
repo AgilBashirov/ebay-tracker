@@ -195,3 +195,30 @@ def format_health(stats: dict) -> str:
         f"🛑 Bloklama: <b>{stats.get('blocked', 0)}</b>\n\n"
         f"Ümumi məhsul sayı: <b>{stats.get('total', 0)}</b>"
     )
+
+
+def format_auto_actions(actions: list[dict], dry_run: bool) -> str:
+    """Avtomatik say sıfırlama əməliyyatlarının hesabatı."""
+    if dry_run:
+        head = ("<b>🧪 QURU REJİM — heç nə dəyişdirilmədi</b>\n\n"
+                "Real rejimdə bunlar edilə bilərdi:")
+    else:
+        head = "<b>🤖 eBay listinqlərində avtomatik dəyişiklik</b>"
+
+    lines = [head, ""]
+    for a in actions:
+        name = _e((a.get("name") or "Adsız")[:55])
+        if a.get("done"):
+            lines.append(f"✅ <b>{name}</b>")
+            lines.append(f"   eBay sayı {a.get('qty_before')} → <b>0</b> edildi")
+        elif a.get("skipped"):
+            lines.append(f"⏭ <b>{name}</b>")
+            lines.append(f"   Toxunulmadı: {_e(a['skipped'])}")
+        else:
+            lines.append(f"🧪 <b>{name}</b>")
+            lines.append(f"   Say {a.get('qty_before')} → 0 ediləcəkdi")
+        lines.append("")
+
+    if dry_run:
+        lines.append("<i>Razısınızsa AUTO_DRY_RUN dəyişənini 0 edin.</i>")
+    return "\n".join(lines).strip()
