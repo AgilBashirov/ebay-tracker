@@ -138,44 +138,63 @@ def price_for_profit(target_profit: float, amazon_price: float) -> float | None:
     return p
 
 
+def price_for_margin_pct(target_pct: float, amazon_price: float) -> float | None:
+    """Verilmiş FAİZ marjasını verən eBay qiymətini həll edir."""
+    k = _fee_coefficient()
+    t = target_pct / 100
+    denom = 1 - k - t
+    if denom <= 0:
+        return None
+    s = config.SHIPPING_CHARGED
+    fee = config.EBAY_ORDER_FEE
+    for _ in range(3):
+        p = (amazon_price + config.SHIPPING_COST + fee - s * (1 - k)) / denom
+        fee = order_fee(p, s)
+    return p
+
+
 def suggest_ebay_price(
     ebay_price: float | None,
     amazon_old: float | None,
     amazon_new: float | None,
 ) -> float | None:
     """
-    TARGET_MARGIN_PCT = 0  -> əvvəlki DOLLAR mənfəətini qoruyur
-    TARGET_MARGIN_PCT > 0  -> hədəf faiz marjasına görə hesablayır
+    Tövsiyə olunan yeni eBay qiyməti.
+
+    İki şərti eyni anda ödəyir:
+      1. Əvvəlki dollar mənfəətini qoruyur (və ya TARGET_MARGIN_PCT-ə çatır)
+      2. Marja minimum həddin (MARGIN_ALERT_PCT) altına düşmür
+
+    İkinci şərt vacibdir: marja onsuz da aşağı olanda köhnə (pis) mənfəəti
+    qorumaq mənasızdır — təklif praktiki olaraq mövcud qiymətlə eyni çıxırdı.
+    Bu halda təklif həddi bərpa edən qiyməti göstərir.
     """
     if amazon_new is None:
         return None
 
+    candidates = []
+
     if config.TARGET_MARGIN_PCT > 0:
-        # mənfəət = P × hədəf%  =>  P(1−k) − C − Sc − fee = P × hədəf%
-        k = _fee_coefficient()
-        t = config.TARGET_MARGIN_PCT / 100
-        denom = 1 - k - t
-        if denom <= 0:
-            return None
-        fee = config.EBAY_ORDER_FEE
-        s = config.SHIPPING_CHARGED
-        for _ in range(3):
-            p = (amazon_new + config.SHIPPING_COST + fee - s * (1 - k)) / denom
-            fee = order_fee(p, s)
-        return _round_price(p)
+        p = price_for_margin_pct(config.TARGET_MARGIN_PCT, amazon_new)
+        if p:
+            candidates.append(p)
+    elif ebay_price is not None:
+        base_amazon = amazon_old if amazon_old is not None else amazon_new
+        old_profit, _ = margin(ebay_price, base_amazon)
+        if old_profit is not None:
+            p = price_for_profit(max(old_profit, 0.0), amazon_new)
+            if p:
+                candidates.append(p)
 
-    if ebay_price is None:
+    # Minimum marja həddi — təklif heç vaxt bundan aşağı olmamalıdır
+    if config.MARGIN_ALERT_PCT > 0:
+        floor_price = price_for_margin_pct(config.MARGIN_ALERT_PCT, amazon_new)
+        if floor_price:
+            candidates.append(floor_price)
+
+    if not candidates:
         return None
-
-    base_amazon = amazon_old if amazon_old is not None else amazon_new
-    old_profit, _ = margin(ebay_price, base_amazon)
-    if old_profit is None:
-        return None
-    if old_profit < 0:
-        old_profit = 0.0   # zərərdə idi — heç olmasa sıfıra çıxaraq
-
-    p = price_for_profit(old_profit, amazon_new)
-    return _round_price(p) if p else None
+    return _round_price(max(candidates))
 
 
 def _round_price(value: float) -> float:
