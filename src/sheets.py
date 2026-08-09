@@ -268,8 +268,14 @@ def count_due(rows, interval_days=None) -> int:
 
 
 def needs_ebay_refresh(row):
-    """eBay məlumatı köhnəlibsə (və ya heç yoxdursa) yenidən oxunmalıdır."""
-    if row["ebay_price"] is None or row.get("ebay_qty") is None:
+    """
+    eBay məlumatı köhnəlibsə (və ya qiymət yoxdursa) yenidən oxunmalıdır.
+
+    Qeyd: say (E sütunu) boş olsa da təkrar oxumuruq — eBay onu çox vaxt
+    ümumiyyətlə vermir, hər dəfə cəhd etmək krediti boş yerə xərcləyər.
+    Say sizin üçün vacibdirsə, E sütununa əl ilə yazın — sistem onu saxlayır.
+    """
+    if row["ebay_price"] is None:
         return True
     if not row["last_check"]:
         return True

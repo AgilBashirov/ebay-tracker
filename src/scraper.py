@@ -155,15 +155,27 @@ class Browser:
 # Amazon
 # ---------------------------------------------------------------------------
 
-# Sıra vacibdir: "priceAmount" Amazon-un buy-box JSON dəyəridir — ən etibarlısı.
-# a-offscreen sonuncudur, çünki bəzən reklam bloklarının qiymətini tuta bilər.
+# VACİB: qiymət YALNIZ buy box-dan oxunur.
+# Səhifə boyu "a-offscreen" axtarmaq təhlükəlidir — stokda olmayan məhsullarda
+# başqa satıcının və ya oxşar məhsulun qiymətini tutur və məhsulu səhvən
+# "satışda və qiyməti var" kimi göstərir.
 PRICE_PATTERNS = [
     r'"priceAmount"\s*:\s*([\d.]+)',
-    r'id="priceblock_ourprice"[^>]*>\s*\$([\d,]+\.\d{2})',
+    r'id=["\']?priceblock_ourprice["\']?[^>]*>\s*\$([\d,]+\.\d{2})',
     r'"displayPrice"\s*:\s*"\$([\d,]+\.\d{2})"',
-    r'data-a-color="price"[^>]*>\s*<span class="a-offscreen">\$([\d,]+\.\d{2})',
-    r'<span class="a-offscreen">\s*\$([\d,]+\.\d{2})\s*</span>',
 ]
+
+# Qiymət buy box JSON-unda tapılmasa, yalnız bu bölgələr daxilində axtarılır.
+PRICE_REGIONS = [
+    r'id=["\']?corePriceDisplay_desktop_feature_div["\']?',
+    r'id=["\']?corePrice_feature_div["\']?',
+    r'id=["\']?apex_desktop["\']?',
+    r'id=["\']?desktop_buybox["\']?',
+]
+PRICE_IN_REGION = r'<span class=["\']?a-offscreen["\']?>\s*\$([\d,]+\.\d{2})'
+
+# Amazon-un "satışda deyil" bloku — ən etibarlı siqnal, dildən asılı deyil.
+OUT_OF_STOCK_BLOCK = r'id=["\']?outOfStock["\']?'
 
 NAME_PATTERNS = [
     r'id="productTitle"[^>]*>\s*(.*?)\s*</span>',
@@ -194,6 +206,7 @@ def parse_amazon(html: str) -> ScrapeResult:
             res.name = _clean(m.group(1))[:200]
             break
 
+    # 1) Buy box JSON dəyəri (ən etibarlısı)
     for pat in PRICE_PATTERNS:
         m = re.search(pat, html, re.S)
         if m:
@@ -202,6 +215,21 @@ def parse_amazon(html: str) -> ScrapeResult:
                 break
             except ValueError:
                 continue
+
+    # 2) Tapılmasa — yalnız qiymət bölgəsi daxilində axtar
+    if res.price is None:
+        for region_pat in PRICE_REGIONS:
+            rm = re.search(region_pat, html, re.I)
+            if not rm:
+                continue
+            region = html[rm.start(): rm.start() + 3000]
+            pm = re.search(PRICE_IN_REGION, region, re.S | re.I)
+            if pm:
+                try:
+                    res.price = float(pm.group(1).replace(",", ""))
+                    break
+                except ValueError:
+                    continue
 
     # Stok mətni — yalnız availability elementindən
     m = re.search(AVAILABILITY_BLOCK, html, re.S | re.I)
@@ -221,6 +249,15 @@ def parse_amazon(html: str) -> ScrapeResult:
         res.qty = int(qm.group(1))
 
     # ---- Stok qərarı ----
+    # ƏN ETİBARLI SİQNAL: Amazon-un "outOfStock" bloku.
+    # Dildən asılı deyil (ispan/alman səhifələrində də eynidir) və buy box
+    # boş olanda mütləq görünür.
+    if re.search(OUT_OF_STOCK_BLOCK, html, re.I):
+        res.in_stock = False
+        res.price = None          # buy box qiyməti yoxdur — nə tapılıbsa yaddır
+        res.stock = res.stock or "Currently unavailable"
+        return res
+
     # VACİB: OOS markerlərini YALNIZ #availability mətnində axtarırıq.
     # Bütün HTML-də axtarmaq yanlış nəticə verir, çünki "out of stock" ifadəsi
     # digər variantlarda, oxşar məhsullarda və rəylərdə də keçir.
@@ -256,7 +293,33 @@ def parse_amazon(html: str) -> ScrapeResult:
     return res
 
 
+ASIN_PATTERNS = [
+    r"/dp/([A-Z0-9]{10})",
+    r"/gp/product/([A-Z0-9]{10})",
+    r"/product/([A-Z0-9]{10})",
+    r"[?&]asin=([A-Z0-9]{10})",
+]
+
+
+def normalize_amazon_url(url: str) -> str:
+    """
+    Linki təmiz formaya salır: https://www.amazon.com/dp/ASIN
+
+    Niyə lazımdır: sheet-dəki linklərdə `language=es` kimi parametrlər olur və
+    səhifə ispan dilində açılır — ingilis stok mətnləri uyğun gəlmir. Həmçinin
+    uzun `ref=` parametrləri bəzən başqa variantı açır.
+    """
+    if not url:
+        return url
+    for pat in ASIN_PATTERNS:
+        m = re.search(pat, url, re.I)
+        if m:
+            return f"https://www.amazon.com/dp/{m.group(1).upper()}"
+    return url
+
+
 def scrape_amazon(browser: Browser, url: str) -> ScrapeResult:
+    url = normalize_amazon_url(url)
     last_err = None
     for attempt in range(config.MAX_RETRIES + 1):
         try:
@@ -353,21 +416,25 @@ def _ebay_qty_region(html: str) -> str:
 def _parse_ebay_qty(html: str) -> int | None:
     """
     eBay listinginizdəki qalıq sayı qaytarır.
-    0    -> satışda deyil / bitib
-    None -> oxuna bilmədi (qərar verərkən "naməlum" kimi baxılır)
+    0    -> listinq bitib (birmənalı siqnal)
+    None -> oxuna bilmədi (sheet-dəki dəyər saxlanılır)
 
-    Sıra vacibdir: əvvəlcə MÜSBƏT siqnal (N available) axtarılır.
-    Yalnız o tapılmayanda "bağlıdır" qərarı verilir — belə ki, məhsulun
-    bir variantının bitməsi bütün listinqi bağlı göstərməsin.
+    NİYƏ BU QƏDƏR EHTİYATLI:
+    eBay say modulunu JavaScript ilə çəkir, xam HTML-də çox vaxt olmur.
+    Dolayı siqnalların hamısı yalanış nəticə verdi:
+      • "out of stock"  -> variant JSON-unda keçir (açıq listinqi bağlı göstərirdi)
+      • "Last one"      -> marketinq etiketidir (HotnessSignalText), say deyil
+      • x-quantity yoxluğu -> açıq listinqlərdə də olmur
+    Ona görə yalnız birmənalı "N available" mətnini qəbul edirik.
+    Qalan hallarda None qaytarılır və sheet-dəki (sizin yazdığınız) dəyər qalır.
     """
     low = html.lower()
 
-    # 1) Açıq şəkildə bitmiş listinq (bütün səhifədə axtarmaq təhlükəsizdir —
-    #    bu ifadələr variant JSON-larında keçmir)
+    # 1) Açıq şəkildə bitmiş listinq
     if any(m in low for m in EBAY_ENDED_MARKERS):
         return 0
 
-    # 2) Müsbət siqnal: "N available" / "More than N available"
+    # 2) Yalnız birmənalı say mətni: "3 available" / "More than 10 available"
     for pat in EBAY_QTY_PATTERNS:
         m = re.search(pat, html, re.S | re.I)
         if m:
@@ -375,13 +442,12 @@ def _parse_ebay_qty(html: str) -> int | None:
             if digits:
                 return int(digits)
 
-    # 3) "Last one"
-    if re.search(r"\blast one\b", low):
+    # 3) "Last one" — YALNIZ say modulunun içində olarsa etibarlıdır.
+    #    Səhifənin qalan hissəsindəki "LAST ONE" reklam etiketidir.
+    region = _ebay_qty_region(html)
+    if region and re.search(r"\blast one\b", region, re.I):
         return 1
-
-    # 4) Yalnız indi — dar sahədə "out of stock" axtarırıq
-    region = _ebay_qty_region(html).lower()
-    if region and any(m in region for m in EBAY_SOLDOUT_NARROW):
+    if region and any(m in region.lower() for m in EBAY_SOLDOUT_NARROW):
         return 0
 
     return None
@@ -465,7 +531,7 @@ def fetch_via_fallback(url: str) -> str | None:
 
 def scrape_amazon_via_api(url: str) -> ScrapeResult:
     """Yalnız API üzərindən oxuyur (birbaşa Amazon-a dəymir)."""
-    html = fetch_via_fallback(url)
+    html = fetch_via_fallback(normalize_amazon_url(url))
     if html is None:
         raise RuntimeError("API kanalı cavab vermədi (kredit bitib ola bilər)")
     return parse_amazon(html)
