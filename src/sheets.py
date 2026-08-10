@@ -4,7 +4,9 @@ Sətir sayı dinamikdir — 54 da olsa, 500 də olsa avtomatik tutur.
 """
 import json
 import os
+import random
 import re
+import time
 from datetime import datetime, timedelta
 
 import gspread
@@ -13,6 +15,44 @@ from google.oauth2.service_account import Credentials
 import config
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+
+# Google-un müvəqqəti xətaları. Bunlar bizim kodun problemi deyil —
+# Google tərəfdə qısamüddətli nasazlıqdır və təkrar cəhdlə keçib gedir.
+RETRYABLE_CODES = (429, 500, 502, 503, 504)
+MAX_ATTEMPTS = int(os.environ.get("SHEETS_MAX_ATTEMPTS", "5"))
+
+
+def _is_retryable(exc) -> bool:
+    """Xəta müvəqqətidirmi (yenidən cəhd etməyə dəyərmi)?"""
+    code = getattr(getattr(exc, "response", None), "status_code", None)
+    if code in RETRYABLE_CODES:
+        return True
+    text = str(exc)
+    return any(f"[{c}]" in text for c in RETRYABLE_CODES) or \
+        "currently unavailable" in text.lower() or \
+        "internal error" in text.lower()
+
+
+def with_retry(func, *args, what="Sheets əməliyyatı", **kwargs):
+    """
+    Google Sheets çağırışını müvəqqəti xətalarda təkrar edir.
+    Gözləmə müddəti hər dəfə iki dəfə artır (1s, 2s, 4s, 8s).
+    """
+    delay = 1.0
+    last = None
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            last = e
+            if not _is_retryable(e) or attempt == MAX_ATTEMPTS:
+                raise
+            wait = delay + random.uniform(0, 0.5)
+            print(f"[sheets] {what}: müvəqqəti xəta ({e.__class__.__name__}), "
+                  f"{wait:.1f}s sonra təkrar ({attempt}/{MAX_ATTEMPTS - 1})")
+            time.sleep(wait)
+            delay *= 2
+    raise last
 
 
 def _client():
@@ -28,9 +68,12 @@ def _client():
 
 
 def open_sheet():
-    gc = _client()
-    sh = gc.open_by_key(config.SHEET_ID)
-    return sh.worksheet(config.SHEET_NAME)
+    def _open():
+        gc = _client()
+        sh = gc.open_by_key(config.SHEET_ID)
+        return sh.worksheet(config.SHEET_NAME)
+
+    return with_retry(_open, what="Sheet açılışı")
 
 
 # ---------------------------------------------------------------------------
@@ -39,7 +82,7 @@ def open_sheet():
 
 def ensure_structure(ws):
     """Başlıqları qoyur və bütün cədvəl görünüşünü tənzimləyir."""
-    current = ws.row_values(1)
+    current = with_retry(ws.row_values, 1, what="Başlıqların oxunması")
     if current[: len(config.HEADERS)] != config.HEADERS:
         ws.update(
             values=[config.HEADERS],
@@ -181,7 +224,7 @@ def _col_letter(idx: int) -> str:
 
 def read_rows(ws):
     """Bütün məhsul sətirlərini oxuyur. Boş sətirlər atlanır."""
-    values = ws.get_all_values()
+    values = with_retry(ws.get_all_values, what="Sətirlərin oxunması")
     rows = []
     for i, raw in enumerate(values[config.FIRST_DATA_ROW - 1:], start=config.FIRST_DATA_ROW):
         padded = raw + [""] * (len(config.HEADERS) - len(raw))
@@ -413,7 +456,8 @@ def write_results(ws, results):
             }
         )
 
-    ws.batch_update(updates, value_input_option="USER_ENTERED")
+    with_retry(ws.batch_update, updates, value_input_option="USER_ENTERED",
+               what="Sətirlərin yazılması")
     _apply_row_colors(ws, results)
 
 

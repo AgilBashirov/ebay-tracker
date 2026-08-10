@@ -222,3 +222,36 @@ def format_auto_actions(actions: list[dict], dry_run: bool) -> str:
     if dry_run:
         lines.append("<i>Razısınızsa AUTO_DRY_RUN dəyişənini 0 edin.</i>")
     return "\n".join(lines).strip()
+
+
+# Müvəqqəti (bizdən asılı olmayan) nasazlıq əlamətləri
+TRANSIENT_HINTS = [
+    "503", "502", "500", "504", "429",
+    "currently unavailable", "internal error", "timed out", "timeout",
+    "connection reset", "temporarily unavailable", "rate limit",
+]
+
+
+def format_run_error(exc: Exception) -> str:
+    """
+    İşləmə xətası haqqında bildiriş.
+    Müvəqqəti nasazlıqla (Google/eBay tərəfdə) real problemi ayırd edir ki,
+    hər kiçik kəsintidə narahat olmayasınız.
+    """
+    text = f"{exc.__class__.__name__}: {exc}"
+    transient = any(h in text.lower() for h in TRANSIENT_HINTS)
+
+    if transient:
+        return (
+            "<b>⏳ İşləmə yarımçıq qaldı — müvəqqəti nasazlıq</b>\n\n"
+            f"<code>{_e(text[:180])}</code>\n\n"
+            "Bu, xidmət provayderinin (Google Sheets / eBay) qısamüddətli "
+            "kəsintisidir, koddakı problem deyil.\n"
+            "<i>Növbəti işləmə avtomatik davam edəcək — tədbir tələb olunmur.</i>"
+        )
+
+    return (
+        "<b>❌ Script xətası</b>\n\n"
+        f"<code>{_e(text[:180])}</code>\n\n"
+        "Bu, təkrarlanan problem ola bilər. GitHub Actions loglarına baxın."
+    )

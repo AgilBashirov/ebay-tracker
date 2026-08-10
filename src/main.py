@@ -366,14 +366,10 @@ if __name__ == "__main__":
 
     try:
         sys.exit(run(health_report=args.health_report))
-    except Exception:
+    except Exception as exc:
         traceback.print_exc()
         try:
-            notify.send(
-                "<b>❌ Script xətası</b>\n\n"
-                "Yoxlama işləməsi tamamlana bilmədi. "
-                "GitHub Actions loglarına baxın."
-            )
+            notify.send(notify.format_run_error(exc))
         except Exception:
             pass
         sys.exit(1)
