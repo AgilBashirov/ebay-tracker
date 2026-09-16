@@ -525,6 +525,65 @@ check("marja yenidən hesablandı",
       bool(w30.get("margin_usd") and w30["margin_usd"] >= config.MIN_PROFIT_USD), True)
 
 # ===========================================================================
+section("8E. DAVAMLILIQ — riyaziyyat və sərhəd halları")
+# ===========================================================================
+print("  Faiz marjası tənliyi (TARGET_MARGIN_PCT rejimi):")
+for pct in [10, 25, 35]:
+    for amz in [9.99, 39.99, 89.99]:
+        pr = pricing.price_for_margin_pct(pct, amz)
+        _, real = pricing.margin(pr, amz)
+        near(f"   {pct}% · ${amz} → ${pr:.2f}", real, pct, 0.05)
+
+print("\n  ƏDV söndürüləndə (biznes satıcısı, ƏDV nömrəsi verilib):")
+_vat = os.environ["EBAY_FEE_VAT_PCT"]
+os.environ["EBAY_FEE_VAT_PCT"] = "0"
+importlib.reload(config); importlib.reload(pricing)
+dv = pricing.fee_breakdown(60.99)
+check("   ƏDV sıfırdır", dv["fee_vat"], 0.0)
+check("   cəmi = haqlar", abs(dv["total"] - dv["fee_subtotal"]) < 0.01, True)
+_p = pricing.price_for_profit(7, 39.99)
+near("   tənlik yenə dəqiqdir", pricing.margin(_p, 39.99)[0], 7.0, 0.02)
+os.environ["EBAY_FEE_VAT_PCT"] = _vat
+importlib.reload(config); importlib.reload(pricing)
+
+print("\n  Mümkünsüz konfiqurasiya (haqlar satışdan çox) — çökməməlidir:")
+_saved = {k: os.environ.get(k) for k in
+          ["EBAY_FVF_PCT", "EBAY_AD_RATE_PCT", "SALES_TAX_PCT"]}
+os.environ.update({"EBAY_FVF_PCT": "60", "EBAY_AD_RATE_PCT": "20",
+                   "SALES_TAX_PCT": "20"})
+importlib.reload(config); importlib.reload(pricing)
+check("   price_for_profit → None", pricing.price_for_profit(7, 39.99), None)
+check("   price_for_margin_pct → None", pricing.price_for_margin_pct(25, 39.99), None)
+check("   plan_price_change → dəyişiklik yoxdur",
+      pricing.plan_price_change(60.99, 39.99)["new_price"], None)
+for k, v in _saved.items():
+    os.environ[k] = v
+importlib.reload(config); importlib.reload(pricing)
+
+print("\n  Aşağı yuvarlaqlaşdırma (hədd aşılmasın):")
+for v, gozlenen in [(45.00, 44.99), (45.99, 45.99), (46.50, 45.99), (0.50, 0.99)]:
+    check(f"   ${v} → ${gozlenen}",
+          abs(pricing._round_price_down(v) - gozlenen) < 0.001, True)
+
+print("\n  Ossilyasiya — qiymət sabitləşməlidir:")
+_q, _dovr = 60.99, 0
+for _dovr in range(1, 8):
+    _pl = pricing.plan_price_change(_q, 39.99)
+    if _pl["new_price"] is None:
+        break
+    _q = _pl["new_price"]
+check(f"   {_dovr} dövrdə sabitləşdi (${_q})", _dovr <= 3, True)
+
+# Əks istiqamət: ucuzlaşmadan sonra da sabitləşməlidir
+_q2 = 100.00
+for _d2 in range(1, 8):
+    _pl2 = pricing.plan_price_change(_q2, 39.99)
+    if _pl2["new_price"] is None:
+        break
+    _q2 = _pl2["new_price"]
+check(f"   ucuzlaşma da sabitləşdi: {_d2} dövr (${_q2})", _d2 <= 4, True)
+
+# ===========================================================================
 section("8. TELEGRAM MESAJI")
 # ===========================================================================
 auto_msg = next((m for m in MESSAGES if "avtomatik dəyişiklik" in m.lower()

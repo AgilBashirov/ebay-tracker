@@ -137,9 +137,6 @@ EBAY_FEE_VAT_PCT = float(os.environ.get("EBAY_FEE_VAT_PCT", "18"))
 SHIPPING_CHARGED = float(os.environ.get("SHIPPING_CHARGED", "0"))
 SHIPPING_COST = float(os.environ.get("SHIPPING_COST", "0"))
 
-# Köhnə ad — geriyə uyğunluq üçün saxlanılır.
-EBAY_FEE_PCT = EBAY_FVF_PCT
-
 # Təklif olunan qiyməti yuvarlaqlaşdırma: "99" -> x.99, "none" -> yuvarlaqlaşdırma yox
 PRICE_ROUNDING = os.environ.get("PRICE_ROUNDING", "99")
 

@@ -100,7 +100,6 @@ jobs:
           MARGIN_ALERT_PCT: ${{ vars.MARGIN_ALERT_PCT || secrets.MARGIN_ALERT_PCT || '15' }}
           PRICE_RISE_MIN_USD: ${{ vars.PRICE_RISE_MIN_USD || secrets.PRICE_RISE_MIN_USD || '0.50' }}
           PRICE_RISE_MIN_PCT: ${{ vars.PRICE_RISE_MIN_PCT || secrets.PRICE_RISE_MIN_PCT || '2.0' }}
-          EBAY_FEE_PCT: ${{ vars.EBAY_FEE_PCT || secrets.EBAY_FEE_PCT || '13.25' }}
           TARGET_MARGIN_PCT: ${{ vars.TARGET_MARGIN_PCT || secrets.TARGET_MARGIN_PCT || '0' }}
           EBAY_PRICE_SOURCE: ${{ vars.EBAY_PRICE_SOURCE || secrets.EBAY_PRICE_SOURCE || 'scrape' }}
           ALERT_ON_PRICE_DROP: ${{ vars.ALERT_ON_PRICE_DROP || secrets.ALERT_ON_PRICE_DROP || '0' }}
