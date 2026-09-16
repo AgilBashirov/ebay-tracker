@@ -123,6 +123,16 @@ EBAY_INTERNATIONAL_PCT = float(os.environ.get("EBAY_INTERNATIONAL_PCT", "1.30"))
 # USD alırsınızsa 0 qalsın.
 EBAY_FX_PCT = float(os.environ.get("EBAY_FX_PCT", "0"))
 
+# ƏDV — eBay ÖZ HAQLARININ üstünə əlavə edir (satışın üstünə yox!).
+# Dərəcə satıcının qeydiyyat ölkəsinə görədir: Azərbaycan 18%, Böyük Britaniya 20%.
+#
+# Yəni:  ödəyəcəyiniz = (FVF + reklam + beynəlxalq + əməliyyat) × 1.18
+#
+# Biznes satıcısısınızsa və eBay-ə ƏDV nömrənizi vermisinizsə 0 ola bilər
+# ("reverse charge"). Dəqiq rəqəmi eBay hesab-fakturanızdan yoxlayın:
+# Payments → Reports → fee invoice.
+EBAY_FEE_VAT_PCT = float(os.environ.get("EBAY_FEE_VAT_PCT", "18"))
+
 # Alıcıdan aldığınız göndərmə haqqı və sizin göndərmə xərciniz (adətən 0).
 SHIPPING_CHARGED = float(os.environ.get("SHIPPING_CHARGED", "0"))
 SHIPPING_COST = float(os.environ.get("SHIPPING_COST", "0"))

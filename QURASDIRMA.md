@@ -288,9 +288,32 @@ Azərbaycan **"Europe Unsited (excl. EU)"** qrupundadır:
 | Promoted Listings | sizin dərəcəniz | reklam işlədirsinizsə |
 | **Beynəlxalq haqq** | **1.30%** | alıcı Azərbaycandan kənardadırsa (yəni həmişə) |
 | Valyuta çevrilişi | 3.0% | ödəniş USD-dən başqa valyutaya çevrilirsə |
+| **ƏDV** | **18%** | **yuxarıdakı haqların CƏMİNƏ əlavə olunur** |
 
-Hamısı **vergi daxil bazadan** hesablanır — yəni alıcıdan alınan satış vergisi
-sizə çatmasa da haqqınızı artırır.
+İki fərqli vergi var, qarışdırmayın:
+
+1. **Alıcıdan alınan satış vergisi** (ABŞ ştatı, ~8%) — sizə çatmır, amma eBay
+   haqqını məhz vergi daxil məbləğdən hesablayır, ona görə xərcinizi artırır.
+2. **ƏDV (18%)** — Azərbaycan dərəcəsidir və eBay-in **öz xidmət haqqının**
+   üstünə gəlir: `(FVF + reklam + beynəlxalq + əməliyyat) × 1.18`
+
+$60.99-luq satışda bu belə görünür:
+
+```
+FVF            $8.96
+reklam         $2.63
+beynəlxalq     $0.86
+əməliyyat      $0.40
+             ───────
+haqlar cəmi   $12.85
+ƏDV 18%        $2.31
+             ───────
+CƏMİ          $15.16
+```
+
+> Biznes satıcısısınızsa və eBay-ə ƏDV nömrənizi vermisinizsə ƏDV 0 ola bilər.
+> Dəqiq rəqəmi eBay hesab-fakturanızdan yoxlayın: **Payments → Reports**.
+> `EBAY_FEE_VAT_PCT` dəyişəni ilə tənzimlənir.
 
 ---
 

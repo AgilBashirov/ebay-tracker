@@ -9,6 +9,7 @@ Model ebayfeescalculator.com ilə eynidir:
     reklam       = baza × reklam%
     beynəlxalq   = baza × 1.30%   (Azərbaycan qeydiyyatlı satıcı)
     valyuta      = baza × 0-3%    (ödəniş USD deyilsə)
+    ƏDV          = (yuxarıdakı haqların cəmi) × 18%   <- HAQLARIN üstünə
     əməliyyat    = $0.40  (sifariş ≤ $10 olduqda $0.30)
 
     mənfəət      = satış + göndərmə haqqı − məhsul xərci − göndərmə xərci − haqlar
@@ -49,7 +50,10 @@ def fee_breakdown(sold_price: float, shipping_charged: float | None = None) -> d
     fx = base * config.EBAY_FX_PCT / 100
     per_order = order_fee(sold_price, shipping_charged)
 
-    total = fvf + ads + intl + fx + per_order
+    subtotal = fvf + ads + intl + fx + per_order
+    # ƏDV eBay-in haqlarının üstünə gəlir — satışın üstünə yox.
+    vat = subtotal * config.EBAY_FEE_VAT_PCT / 100
+    total = subtotal + vat
     return {
         "sales_tax": round(tax, 2),
         "fee_base": round(base, 2),
@@ -58,6 +62,8 @@ def fee_breakdown(sold_price: float, shipping_charged: float | None = None) -> d
         "international": round(intl, 2),
         "fx": round(fx, 2),
         "order_fee": round(per_order, 2),
+        "fee_subtotal": round(subtotal, 2),
+        "fee_vat": round(vat, 2),
         "total": round(total, 2),
     }
 
@@ -109,10 +115,15 @@ def margin_details(ebay_price: float | None, amazon_price: float | None) -> dict
 # Tövsiyə olunan qiymət
 # ---------------------------------------------------------------------------
 
+def _vat_mult() -> float:
+    """Haqların ƏDV ilə birlikdə əmsalı (Azərbaycan üçün 1.18)."""
+    return 1 + config.EBAY_FEE_VAT_PCT / 100
+
+
 def _fee_coefficient() -> float:
     """
     Satış qiymətinin faiz kimi gedən hissəsi.
-    (1 + vergi%) × (FVF% + reklam% + beynəlxalq%)
+    (1 + vergi%) × (FVF% + reklam% + beynəlxalq% + valyuta%) × (1 + ƏDV%)
     """
     rate = (
         config.EBAY_FVF_PCT
@@ -120,7 +131,7 @@ def _fee_coefficient() -> float:
         + config.EBAY_INTERNATIONAL_PCT
         + config.EBAY_FX_PCT
     ) / 100
-    return (1 + config.SALES_TAX_PCT / 100) * rate
+    return (1 + config.SALES_TAX_PCT / 100) * rate * _vat_mult()
 
 
 def price_for_profit(target_profit: float, amazon_price: float) -> float | None:
@@ -134,11 +145,12 @@ def price_for_profit(target_profit: float, amazon_price: float) -> float | None:
     if k >= 1:
         return None
     s = config.SHIPPING_CHARGED
+    v = _vat_mult()
     # Sifariş haqqı qiymətdən asılıdır — iki dəfə hesablayıb dəqiqləşdiririk
-    fee = config.EBAY_ORDER_FEE
-    for _ in range(3):
+    fee = config.EBAY_ORDER_FEE * v
+    for _ in range(4):
         p = (target_profit + amazon_price + config.SHIPPING_COST + fee) / (1 - k) - s
-        fee = order_fee(p, s)
+        fee = order_fee(p, s) * v
     return p
 
 
@@ -150,10 +162,11 @@ def price_for_margin_pct(target_pct: float, amazon_price: float) -> float | None
     if denom <= 0:
         return None
     s = config.SHIPPING_CHARGED
-    fee = config.EBAY_ORDER_FEE
-    for _ in range(3):
+    v = _vat_mult()
+    fee = config.EBAY_ORDER_FEE * v
+    for _ in range(4):
         p = (amazon_price + config.SHIPPING_COST + fee - s * (1 - k)) / denom
-        fee = order_fee(p, s)
+        fee = order_fee(p, s) * v
     return p
 
 

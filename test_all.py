@@ -20,6 +20,9 @@ os.environ.setdefault("EBAY_FVF_PCT", "13.6")
 # modelə daxil deyil. Müqayisənin düz olması üçün burada da 0 qoyuruq.
 # Azərbaycan haqqı (1.30%) ayrıca test_automation.py-də yoxlanılır.
 os.environ.setdefault("EBAY_INTERNATIONAL_PCT", "0")
+# Kalkulyator haqların üstünə gələn ƏDV-ni də modelləşdirmir.
+# Azərbaycan ƏDV-si (18%) ayrıca test_auto.py-də yoxlanılır.
+os.environ.setdefault("EBAY_FEE_VAT_PCT", "0")
 
 PASS, FAIL = [], []
 

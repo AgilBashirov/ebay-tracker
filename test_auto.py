@@ -25,6 +25,7 @@ os.environ.update({
     # Agil-in real ayarları
     "EBAY_FVF_PCT": "13.6", "EBAY_AD_RATE_PCT": "4", "SALES_TAX_PCT": "8",
     "EBAY_INTERNATIONAL_PCT": "1.30", "EBAY_FX_PCT": "0",
+    "EBAY_FEE_VAT_PCT": "18",
     # Avtomatika tam açıq
     "AUTO_ZERO_QTY": "1", "AUTO_QTY": "1", "AUTO_PRICE": "1",
 })
@@ -55,27 +56,42 @@ import ebay_write
 import pricing
 
 # ===========================================================================
-section("1. HAQQ MODELİ — Azərbaycan satıcısı (beynəlxalq haqq 1.30%)")
+section("1. HAQQ MODELİ — Azərbaycan (beynəlxalq 1.30% + haqlara ƏDV 18%)")
 # ===========================================================================
 d = pricing.fee_breakdown(60.99)
-print(f"  Satış $60.99 · vergi 8% · FVF 13.6% · reklam 4% · beynəlxalq 1.30%")
-print(f"  Baza ${d['fee_base']}  =  60.99 + vergi ${d['sales_tax']}")
-near("vergi (8% × 60.99)", d["sales_tax"], 4.88)
+print("  Satış $60.99 · satış vergisi 8% · FVF 13.6% · reklam 4% · beynəlxalq 1.30%")
+print(f"  Haqq bazası ${d['fee_base']} = 60.99 + alıcı vergisi ${d['sales_tax']}")
+near("alıcıdan satış vergisi", d["sales_tax"], 4.88)
 near("haqq bazası", d["fee_base"], 65.87)
 near("FVF (13.6% × baza)", d["fvf"], 8.96)
 near("reklam (4% × baza)", d["ads"], 2.63)
 near("beynəlxalq (1.30% × baza)", d["international"], 0.86)
 near("əməliyyat haqqı", d["order_fee"], 0.40)
-near("CƏMİ haqq", d["total"], 12.85)
+near("haqlar cəmi (ƏDV-siz)", d["fee_subtotal"], 12.85)
+near("ƏDV (18% × haqlar)", d["fee_vat"], 2.31)
+near("CƏMİ ödəyəcəyiniz", d["total"], 15.16)
+
+# ƏDV haqların üstünə gəlir, satışın üstünə YOX — bunu təsdiqləyək
+check("ƏDV bazası = haqlar (satış deyil)",
+      abs(d["fee_vat"] - d["fee_subtotal"] * 0.18) < 0.01, True)
 
 d0 = pricing.fee_breakdown(60.99)
-os.environ["EBAY_INTERNATIONAL_PCT"] = "0"
-importlib.reload(config); importlib.reload(pricing)
-d_no = pricing.fee_breakdown(60.99)
-print(f"\n  Beynəlxalq haqq OLMASA: ${d_no['total']} "
-      f"→ fərq ${d0['total'] - d_no['total']:.2f} (hər satışda əlavə xərc)")
-os.environ["EBAY_INTERNATIONAL_PCT"] = "1.30"
-importlib.reload(config); importlib.reload(pricing)
+for ad, acar, deyer in [("beynəlxalq haqq", "EBAY_INTERNATIONAL_PCT", "0"),
+                        ("ƏDV", "EBAY_FEE_VAT_PCT", "0")]:
+    kohne = os.environ[acar]
+    os.environ[acar] = deyer
+    importlib.reload(config); importlib.reload(pricing)
+    dn = pricing.fee_breakdown(60.99)
+    print(f"  {ad} olmasa: ${dn['total']} → fərq ${d0['total'] - dn['total']:.2f}")
+    os.environ[acar] = kohne
+    importlib.reload(config); importlib.reload(pricing)
+
+print("\n  Tənliyin doğruluğu (hədəf qazanc → qiymət → real qazanc):")
+for t in [5.0, 7.0, 10.0]:
+    for amz in [9.99, 39.99, 89.99]:
+        pr = pricing.price_for_profit(t, amz)
+        real, _ = pricing.margin(pr, amz)
+        near(f"hədəf ${t:.0f} · Amazon ${amz} → ${pr:.2f}", real, t, 0.02)
 
 # ===========================================================================
 section("2. HƏDƏF QAZANC PİLLƏLƏRİ (20:$5 · 50:$7 · yuxarı:$10)")
@@ -117,11 +133,23 @@ near("yeni qazanc hədəfə çatır", p["new_profit"], p["target_profit"], 1.00)
 check("qiymət artıb", p["new_price"] > 60.99, True)
 
 print("\n  a2) Qazanc hədəfdən bir az çoxdur — dözümlülük zonası")
-p_ok = pricing.plan_price_change(60.99, 39.99)
-c_ok, _ = pricing.margin(60.99, 39.99)
-print(f"     Qazanc ${c_ok} · hədəf ${p_ok['target_profit']} "
+# Hədəfdən $1 çox qazanc verən qiyməti hesablayırıq (sabit rəqəm yazmırıq ki,
+# haqq dərəcələri dəyişəndə test köhnəlməsin).
+_t = pricing.target_profit_for(39.99)
+qiymet_ok = round(pricing.price_for_profit(_t + 1.0, 39.99), 2)
+p_ok = pricing.plan_price_change(qiymet_ok, 39.99)
+c_ok, _ = pricing.margin(qiymet_ok, 39.99)
+print(f"     Qiymət ${qiymet_ok} · qazanc ${c_ok} · hədəf ${_t} "
       f"(dözümlülük +${config.AUTO_PRICE_DOWN_TOLERANCE}) → {p_ok['reason']}")
 check("dözümlülük zonasında toxunulmur", p_ok["new_price"], None)
+
+# Dözümlülük həddini aşanda isə düzəliş olmalıdır
+qiymet_cox = round(pricing.price_for_profit(
+    _t + config.AUTO_PRICE_DOWN_TOLERANCE + 2.0, 39.99), 2)
+p_cox = pricing.plan_price_change(qiymet_cox, 39.99)
+print(f"     Qiymət ${qiymet_cox} · qazanc "
+      f"${pricing.margin(qiymet_cox, 39.99)[0]} → {p_cox['reason']}")
+check("dözümlülük aşılanda qiymət aşağı salınır", p_cox["direction"], "down")
 
 print("\n  b) Amazon ucuzlaşıb — qazanc hədəfi xeyli aşır")
 p2 = pricing.plan_price_change(60.99, 25.00)

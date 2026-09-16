@@ -84,6 +84,7 @@ jobs:
           # --- Azərbaycan satıcısı üçün haqlar ---
           EBAY_INTERNATIONAL_PCT: ${{ vars.EBAY_INTERNATIONAL_PCT || secrets.EBAY_INTERNATIONAL_PCT || '1.30' }}
           EBAY_FX_PCT: ${{ vars.EBAY_FX_PCT || secrets.EBAY_FX_PCT || '0' }}
+          EBAY_FEE_VAT_PCT: ${{ vars.EBAY_FEE_VAT_PCT || secrets.EBAY_FEE_VAT_PCT || '18' }}
           ALERT_ON_PRICE_RISE: ${{ vars.ALERT_ON_PRICE_RISE || secrets.ALERT_ON_PRICE_RISE || '1' }}
           ALERT_ON_LOW_QTY: ${{ vars.ALERT_ON_LOW_QTY || secrets.ALERT_ON_LOW_QTY || '1' }}
           ALERT_ON_OUT_OF_STOCK: ${{ vars.ALERT_ON_OUT_OF_STOCK || secrets.ALERT_ON_OUT_OF_STOCK || '1' }}
