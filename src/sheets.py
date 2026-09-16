@@ -149,6 +149,7 @@ def apply_layout(ws):
         14: 115,  # N Növbəti Yoxlama
         15: 150,  # O Status
         16: 70,   # P Avto
+        17: 230,  # Q Avto Əməliyyat
     }
     for col, px in widths.items():
         reqs.append({
@@ -192,6 +193,7 @@ def apply_layout(ws):
     align(8, 8, "LEFT")      # H stok mətni
     align(9, 12, "RIGHT")    # I-L haqq, marja, təklif
     align(13, 16, "CENTER")  # M-P tarixlər, status, avto
+    align(17, 17, "LEFT")    # Q bot nə etdi
 
     # ---- Status sütunu qalın ----
     reqs.append({
@@ -247,6 +249,7 @@ def read_rows(ws):
                 "next_check": padded[config.COL["next_check"] - 1].strip(),
                 "prev_status": padded[config.COL["status"] - 1].strip(),
                 "auto": padded[config.COL["auto"] - 1].strip(),
+                "auto_log": padded[config.COL["auto_log"] - 1].strip(),
             }
         )
     return rows
@@ -455,6 +458,15 @@ def write_results(ws, results):
                 ],
             }
         )
+
+    # Q sütunu (bot əməliyyatı) ayrıca yazılır — aralarındakı P sütunu
+    # sizindir, ona heç vaxt toxunulmur.
+    for r in results:
+        if r.get("auto_log"):
+            updates.append({
+                "range": f"Q{r['row']}",
+                "values": [[r["auto_log"]]],
+            })
 
     with_retry(ws.batch_update, updates, value_input_option="USER_ENTERED",
                what="Sətirlərin yazılması")

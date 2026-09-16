@@ -7,7 +7,8 @@ Model ebayfeescalculator.com ilə eynidir:
     haqq bazası  = satış + göndərmə haqqı + vergi
     FVF          = baza × FVF%
     reklam       = baza × reklam%
-    beynəlxalq   = baza × 1.65%   (yalnız xaricə satışda)
+    beynəlxalq   = baza × 1.30%   (Azərbaycan qeydiyyatlı satıcı)
+    valyuta      = baza × 0-3%    (ödəniş USD deyilsə)
     əməliyyat    = $0.40  (sifariş ≤ $10 olduqda $0.30)
 
     mənfəət      = satış + göndərmə haqqı − məhsul xərci − göndərmə xərci − haqlar
@@ -45,15 +46,17 @@ def fee_breakdown(sold_price: float, shipping_charged: float | None = None) -> d
     fvf = base * config.EBAY_FVF_PCT / 100
     ads = base * config.EBAY_AD_RATE_PCT / 100
     intl = base * config.EBAY_INTERNATIONAL_PCT / 100
+    fx = base * config.EBAY_FX_PCT / 100
     per_order = order_fee(sold_price, shipping_charged)
 
-    total = fvf + ads + intl + per_order
+    total = fvf + ads + intl + fx + per_order
     return {
         "sales_tax": round(tax, 2),
         "fee_base": round(base, 2),
         "fvf": round(fvf, 2),
         "ads": round(ads, 2),
         "international": round(intl, 2),
+        "fx": round(fx, 2),
         "order_fee": round(per_order, 2),
         "total": round(total, 2),
     }
@@ -115,6 +118,7 @@ def _fee_coefficient() -> float:
         config.EBAY_FVF_PCT
         + config.EBAY_AD_RATE_PCT
         + config.EBAY_INTERNATIONAL_PCT
+        + config.EBAY_FX_PCT
     ) / 100
     return (1 + config.SALES_TAX_PCT / 100) * rate
 
@@ -159,15 +163,14 @@ def suggest_ebay_price(
     amazon_new: float | None,
 ) -> float | None:
     """
-    Tövsiyə olunan yeni eBay qiyməti.
+    Tövsiyə olunan yeni eBay qiyməti — avtomatikanın tətbiq edəcəyi qiymətlə
+    EYNİDİR, yəni sheet-dəki "Tövsiyə" sütunu botun etdiyi işi əks etdirir.
 
-    İki şərti eyni anda ödəyir:
-      1. Əvvəlki dollar mənfəətini qoruyur (və ya TARGET_MARGIN_PCT-ə çatır)
-      2. Marja minimum həddin (MARGIN_ALERT_PCT) altına düşmür
+    Əsas meyar: hər satışdan hədəflənən TƏMİZ QAZANC ($) — pilləlidir
+    (bax config.PROFIT_TIERS). Faiz marjası deyil, çünki dropshipping-də
+    əhəmiyyətli olan satışdan əlinizə keçən dollar məbləğidir.
 
-    İkinci şərt vacibdir: marja onsuz da aşağı olanda köhnə (pis) mənfəəti
-    qorumaq mənasızdır — təklif praktiki olaraq mövcud qiymətlə eyni çıxırdı.
-    Bu halda təklif həddi bərpa edən qiyməti göstərir.
+    TARGET_MARGIN_PCT təyin edilibsə (defolt 0 = bağlı) faiz hədəfi üstün tutulur.
     """
     if amazon_new is None:
         return None
@@ -178,23 +181,23 @@ def suggest_ebay_price(
         p = price_for_margin_pct(config.TARGET_MARGIN_PCT, amazon_new)
         if p:
             candidates.append(p)
-    elif ebay_price is not None:
-        base_amazon = amazon_old if amazon_old is not None else amazon_new
-        old_profit, _ = margin(ebay_price, base_amazon)
-        if old_profit is not None:
-            p = price_for_profit(max(old_profit, 0.0), amazon_new)
-            if p:
-                candidates.append(p)
-
-    # Minimum marja həddi — təklif heç vaxt bundan aşağı olmamalıdır
-    if config.MARGIN_ALERT_PCT > 0:
-        floor_price = price_for_margin_pct(config.MARGIN_ALERT_PCT, amazon_new)
-        if floor_price:
-            candidates.append(floor_price)
+    else:
+        p = price_for_profit(target_profit_for(amazon_new), amazon_new)
+        if p:
+            candidates.append(p)
 
     if not candidates:
         return None
     return _round_price(max(candidates))
+
+
+def _round_price_down(value: float) -> float:
+    """.99 ilə bitən ən yaxın AŞAĞI dəyər — təhlükəsizlik həddini aşmamaq üçün."""
+    if config.PRICE_ROUNDING != "99":
+        return round(value, 2)
+    cents = round(value * 100)
+    target = math.floor((cents - 99) / 100) * 100 + 99
+    return max(target / 100, 0.99)
 
 
 def _round_price(value: float) -> float:
@@ -246,6 +249,7 @@ def classify(
     margin_pct: float | None,
     ebay_qty: int | None = None,
     amazon_qty: int | None = None,
+    margin_usd: float | None = None,
 ) -> tuple[str, bool, str | None]:
     """
     (sheet_statusu, bildiriş_getsin_mi, səbəb) qaytarır.
@@ -296,7 +300,12 @@ def classify(
     # ---- 6) Marja həddin altında ----------------------------------------------
     if ebay_price is None:
         return "XETA eBay qiyməti yoxdur", False, None
-    if margin_pct is not None and margin_pct < config.MARGIN_ALERT_PCT:
+    # Qazanc dollarla ölçülür: "$5-dən az qazanc verən məhsul sərf etmir".
+    # margin_usd verilməyibsə köhnə faiz həddinə qayıdırıq (geriyə uyğunluq).
+    if margin_usd is not None:
+        if margin_usd < config.MIN_PROFIT_USD:
+            return "AZ QAZANC", _alert_enabled(REASON_LOW_MARGIN), REASON_LOW_MARGIN
+    elif margin_pct is not None and margin_pct < config.MARGIN_ALERT_PCT:
         return "AZ MARJA", _alert_enabled(REASON_LOW_MARGIN), REASON_LOW_MARGIN
 
     return "OK", False, None
@@ -324,10 +333,142 @@ def next_interval_days(status: str, price_changed: bool, prev_interval: float) -
         return config.ERROR_INTERVAL_DAYS
     if s.startswith(("STOK YOX (eBay bağlı)",)):
         return config.ERROR_INTERVAL_DAYS / 2   # passiv məhsul, seyrək yoxla
-    if s.startswith(("AZ MARJA", "AZ STOK", "STOK YOX", "TEKRAR AC", "QIYMET")):
+    if s.startswith(("AZ MARJA", "AZ QAZANC", "AZ STOK", "STOK YOX",
+                     "TEKRAR AC", "QIYMET")):
         return config.ATTENTION_INTERVAL_DAYS
     if price_changed:
         return config.CHECK_INTERVAL_DAYS
 
     grown = max(prev_interval, config.CHECK_INTERVAL_DAYS) + 1
     return min(grown, config.MAX_INTERVAL_DAYS)
+
+
+# ---------------------------------------------------------------------------
+# AVTOMATİKA — hədəf qazanc, say planı, qiymət planı
+# ---------------------------------------------------------------------------
+
+def target_profit_for(amazon_price: float | None) -> float:
+    """
+    Bu məhsuldan hədəflənən təmiz qazanc ($).
+    Pilləlidir: ucuz məhsulda az, bahalıda çox (config.PROFIT_TIERS).
+    """
+    if amazon_price is None:
+        return config.MIN_PROFIT_USD
+    for upto, profit in config.PROFIT_TIERS:
+        if amazon_price <= upto:
+            return profit
+    return config.PROFIT_TIERS[-1][1]
+
+
+def desired_qty(in_stock: bool, amazon_qty: int | None) -> int:
+    """
+    eBay listinqində olmalı olan say.
+
+      Amazon-da stok yoxdur            -> 0
+      Amazon sayı məlumdur, 10-dan az  -> 1
+      Amazon sayı 10+ VƏ YA bilinmir   -> 3
+
+    Say bilinmirsə "bol" sayılır: Amazon qalıq sayı yalnız azaldıqda
+    ("Only N left in stock") göstərir — göstərmirsə ehtiyat kifayətdir.
+    """
+    if not in_stock:
+        return 0
+    if amazon_qty is None:
+        return config.QTY_WHEN_PLENTY
+    if amazon_qty <= 0:
+        return 0
+    if amazon_qty >= config.QTY_PLENTY_THRESHOLD:
+        return config.QTY_WHEN_PLENTY
+    return config.QTY_WHEN_LOW
+
+
+def plan_price_change(
+    current_price: float | None,
+    amazon_price: float | None,
+    in_stock: bool = True,
+) -> dict:
+    """
+    Qiymətin dəyişdirilməli olub-olmadığını qərara alır.
+
+    Qaytarır:
+      {"new_price": float|None,   # None = dəyişiklik lazım deyil / mümkün deyil
+       "direction": "up"|"down"|None,
+       "target_profit": float,
+       "current_profit": float|None,
+       "new_profit": float|None,
+       "capped": bool,            # hədd səbəbindən hədəfə çatmadı
+       "below_min": bool,         # hədd sonrası qazanc MIN_PROFIT_USD-dən az
+       "reason": str}
+    """
+    out = {"new_price": None, "direction": None, "capped": False,
+           "below_min": False, "current_profit": None, "new_profit": None,
+           "target_profit": target_profit_for(amazon_price), "reason": ""}
+
+    if not in_stock:
+        out["reason"] = "Amazon-da stok yoxdur — qiymətə toxunulmur"
+        return out
+    if amazon_price is None or current_price is None or current_price <= 0:
+        out["reason"] = "qiymət məlum deyil"
+        return out
+
+    target = out["target_profit"]
+    cur_profit, _ = margin(current_price, amazon_price)
+    out["current_profit"] = cur_profit
+    if cur_profit is None:
+        out["reason"] = "cari qazanc hesablana bilmədi"
+        return out
+
+    # Qazanc hədəfin ətrafındadırsa toxunmuruq (qiymətin oynamaması üçün)
+    if cur_profit >= target - config.AUTO_PRICE_UP_TOLERANCE:
+        if cur_profit <= target + config.AUTO_PRICE_DOWN_TOLERANCE:
+            out["reason"] = f"qazanc hədəfə uyğundur (${cur_profit:.2f} ≈ ${target:.2f})"
+            return out
+        if not config.AUTO_PRICE_ALLOW_DOWN:
+            out["reason"] = "qazanc hədəfdən çoxdur, amma azaltma bağlıdır"
+            return out
+
+    ideal = price_for_profit(target, amazon_price)
+    if ideal is None:
+        out["reason"] = "hədəf qiymət həll edilmədi"
+        return out
+    ideal = _round_price(ideal)
+
+    # --- Hədlər: bir işləmədə nə qədər dəyişə bilər ---
+    up_cap = current_price * (1 + config.AUTO_PRICE_MAX_UP_PCT / 100)
+    down_cap = current_price * (1 - config.AUTO_PRICE_MAX_DOWN_PCT / 100)
+    new_price = ideal
+    if ideal > up_cap:
+        # Yuxarı hədd: AŞAĞI yuvarlaqlaşdırırıq ki, hədd aşılmasın
+        new_price = _round_price_down(up_cap)
+        out["capped"] = True
+    elif ideal < down_cap:
+        # Aşağı hədd: YUXARI yuvarlaqlaşdırırıq ki, hədd aşılmasın
+        new_price = _round_price(down_cap)
+        out["capped"] = True
+
+    if abs(new_price - current_price) < config.AUTO_PRICE_MIN_DIFF_USD:
+        out["reason"] = "fərq çox kiçikdir"
+        # Hədd səbəbindən dəyişə bilmiriksə və qazanc azdırsa — xəbər verilsin
+        if out["capped"] and cur_profit < config.MIN_PROFIT_USD:
+            out["below_min"] = True
+        return out
+
+    new_profit, _ = margin(new_price, amazon_price)
+    out["new_profit"] = new_profit
+
+    # Mütləq qoruma: heç vaxt zərərinə satmırıq.
+    # Bu vəziyyət o deməkdir ki, hədəfə çatmaq üçün qiyməti təhlükəsizlik
+    # həddindən çox qaldırmaq lazımdır — avtomatik etmirik, xəbər veririk.
+    if new_profit is None or new_profit <= 0:
+        out["below_min"] = True
+        out["new_profit"] = None
+        out["reason"] = ("hədəfə çatmaq üçün qiymət təhlükəsizlik həddindən "
+                         "çox qaldırılmalıdır — əl ilə baxın")
+        return out
+
+    out["below_min"] = new_profit < config.MIN_PROFIT_USD
+    out["new_price"] = new_price
+    out["direction"] = "up" if new_price > current_price else "down"
+    out["reason"] = (f"hədəf ${target:.2f} qazanc "
+                     f"(cari ${cur_profit:.2f} → yeni ${new_profit:.2f})")
+    return out

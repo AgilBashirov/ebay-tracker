@@ -31,12 +31,13 @@ COL = {
     "next_check":    14,   # N  <- növbəti yoxlama vaxtı (kredit qənaəti)
     "status":        15,   # O
     "auto":          16,   # P  <- avtomatik dəyişikliyə icazə (siz yazırsınız)
+    "auto_log":      17,   # Q  <- bot nə etdi (audit izi, bot yazır)
 }
 HEADERS = [
     "eBay Link", "Amazon Link", "Məhsul Adı", "eBay Qiymətim", "eBay Say",
     "Amazon (əvvəlki)", "Amazon (indiki)", "Stok",
     "eBay Haqqı", "Marja $", "Marja %", "Tövsiyə eBay",
-    "Son Yoxlama", "Növbəti Yoxlama", "Status", "Avto",
+    "Son Yoxlama", "Növbəti Yoxlama", "Status", "Avto", "Avto Əməliyyat",
 ]
 FIRST_DATA_ROW = 2
 
@@ -108,8 +109,19 @@ EBAY_ORDER_FEE_THRESHOLD = float(os.environ.get("EBAY_ORDER_FEE_THRESHOLD", "10"
 # eBay bunu alıcıdan yığır, sizə çatmır, AMMA haqq bazasını artırır.
 SALES_TAX_PCT = float(os.environ.get("SALES_TAX_PCT", "10"))
 
-# Beynəlxalq satış əlavəsi (%). Yalnız xaricə satırsınızsa 1.65 qoyun.
-EBAY_INTERNATIONAL_PCT = float(os.environ.get("EBAY_INTERNATIONAL_PCT", "0"))
+# Beynəlxalq satış haqqı (%). eBay-də qeydiyyat ünvanınız satışın getdiyi
+# ölkədən kənardadırsa tutulur — dropshipping-də DEMƏK OLAR HƏMİŞƏ.
+#
+# eBay rəsmi cədvəli (International fees for eBay global sellers, id=5224):
+#   Azərbaycan → "Europe Unsited (excl. EU)" qrupu → 1.30%
+#   Rest of APAC 1.30% · Rest of World 1.55% · Hindistan 1.70% · Yaponiya 1.35%
+# Baza FVF ilə eynidir (qiymət + göndərmə + vergi).
+EBAY_INTERNATIONAL_PCT = float(os.environ.get("EBAY_INTERNATIONAL_PCT", "1.30"))
+
+# Valyuta çevrilişi haqqı (%). eBay ödənişi USD-dən başqa valyutaya
+# çevirirsə 3.0 tutulur (Azərbaycan "All other eBay global countries").
+# USD alırsınızsa 0 qalsın.
+EBAY_FX_PCT = float(os.environ.get("EBAY_FX_PCT", "0"))
 
 # Alıcıdan aldığınız göndərmə haqqı və sizin göndərmə xərciniz (adətən 0).
 SHIPPING_CHARGED = float(os.environ.get("SHIPPING_CHARGED", "0"))
@@ -240,17 +252,99 @@ EBAY_AUTH_TOKEN = os.environ.get("EBAY_AUTH_TOKEN", "")
 # Amazon-da stok bitəndə eBay sayını avtomatik 0 etmək.
 AUTO_ZERO_QTY = _flag("AUTO_ZERO_QTY", False)
 
+# ---------------------------------------------------------------------------
+# AVTOMATİK SAY İDARƏSİ
+# ---------------------------------------------------------------------------
+# Amazon-dakı vəziyyətə görə eBay sayınız avtomatik tənzimlənir:
+#   Amazon-da stok yoxdur          -> 0   (listinq bağlanmır, tarixçə qalır)
+#   Amazon sayı 10-dan azdır       -> 1   (yalnız bir sifariş öhdəliyi)
+#   Amazon sayı 10+ / say bilinmir -> 3   (Amazon "In Stock" deyirsə bol sayılır)
+AUTO_QTY = _flag("AUTO_QTY", False)
+
+QTY_PLENTY_THRESHOLD = int(os.environ.get("QTY_PLENTY_THRESHOLD", "10"))
+QTY_WHEN_PLENTY = int(os.environ.get("QTY_WHEN_PLENTY", "3"))
+QTY_WHEN_LOW = int(os.environ.get("QTY_WHEN_LOW", "1"))
+
+# ---------------------------------------------------------------------------
+# AVTOMATİK QİYMƏT İDARƏSİ
+# ---------------------------------------------------------------------------
+# Hər satışdan hədəf TƏMİZ qazanc (bütün haqlar çıxıldıqdan sonra).
+# Format: "Amazon_qiymət_həddi:hədəf_qazanc" — sıra ilə yoxlanılır.
+#   20:5   -> Amazon $20-a qədərdirsə hədəf $5
+#   50:7   -> $20-50 arası  -> $7
+#   1e9:10 -> $50-dən baha  -> $10
+PROFIT_TIERS_RAW = os.environ.get("PROFIT_TIERS", "20:5,50:7,1000000:10")
+
+# Bu məbləğdən az qazanc verən məhsul sərf etmir — bildiriş göndərilir.
+MIN_PROFIT_USD = float(os.environ.get("MIN_PROFIT_USD", "5"))
+
+AUTO_PRICE = _flag("AUTO_PRICE", False)
+
+# Qiymətin AŞAĞI salınmasına icazə (Amazon ucuzlaşanda rəqabətli qalmaq üçün).
+AUTO_PRICE_ALLOW_DOWN = _flag("AUTO_PRICE_ALLOW_DOWN", True)
+
+# Qazanc hədəfdən bu qədər ÇOX olanda qiymət aşağı salınır.
+# Kiçik dalğalanmalarda qiymətin oynamaması üçün lazımdır.
+AUTO_PRICE_DOWN_TOLERANCE = float(os.environ.get("AUTO_PRICE_DOWN_TOLERANCE", "2.00"))
+
+# Qazanc hədəfdən bu qədər AZ olanda qiymət qaldırılır.
+AUTO_PRICE_UP_TOLERANCE = float(os.environ.get("AUTO_PRICE_UP_TOLERANCE", "0.25"))
+
+# Bir işləmədə qiymətin maksimum dəyişməsi (%) — səhv oxunuşa qarşı sığorta.
+AUTO_PRICE_MAX_UP_PCT = float(os.environ.get("AUTO_PRICE_MAX_UP_PCT", "50"))
+AUTO_PRICE_MAX_DOWN_PCT = float(os.environ.get("AUTO_PRICE_MAX_DOWN_PCT", "25"))
+
+# Bundan kiçik fərqə görə qiymət dəyişdirilmir (boş yerə sorğu getməsin).
+AUTO_PRICE_MIN_DIFF_USD = float(os.environ.get("AUTO_PRICE_MIN_DIFF_USD", "0.50"))
+
+
+def _parse_tiers(raw: str):
+    tiers = []
+    for part in raw.split(","):
+        part = part.strip()
+        if not part or ":" not in part:
+            continue
+        upto, profit = part.split(":", 1)
+        try:
+            tiers.append((float(upto), float(profit)))
+        except ValueError:
+            continue
+    return sorted(tiers) or [(1e9, 5.0)]
+
+
+PROFIT_TIERS = _parse_tiers(PROFIT_TIERS_RAW)
+
 # QURU REJİM — defolt AÇIQ. Nə ediləcəyini yazır, amma HEÇ NƏYİ dəyişmir.
 # Bir neçə gün nəticələrə baxıb əmin olandan sonra "0" edin.
 AUTO_DRY_RUN = _flag("AUTO_DRY_RUN", True)
 
-# Sətir üzrə icazə: P sütununda bu dəyərlərdən biri olmalıdır.
+# Sətir üzrə icazə — P sütunu ("Avto"). Nə yaza bilərsiniz:
+#   beli / he / yes / 1   -> həm say, həm qiymət avtomatik
+#   say  / sayi / qty     -> yalnız say
+#   qiymet / qiymət/price -> yalnız qiymət
+#   boş / yox             -> heç nəyə toxunulmur
 AUTO_ALLOW_VALUES = {"beli", "bəli", "he", "hə", "yes", "y", "1", "true", "var", "ok"}
+AUTO_QTY_ONLY_VALUES = {"say", "sayi", "sayı", "qty", "quantity", "stok"}
+AUTO_PRICE_ONLY_VALUES = {"qiymet", "qiymət", "price", "qiy"}
+
+
+def auto_modes(cell_value: str) -> set:
+    """P sütunundakı dəyərdən icazə verilən rejimləri çıxarır."""
+    v = str(cell_value or "").strip().lower()
+    if not v:
+        return set()
+    if v in AUTO_ALLOW_VALUES:
+        return {"qty", "price"}
+    if v in AUTO_QTY_ONLY_VALUES:
+        return {"qty"}
+    if v in AUTO_PRICE_ONLY_VALUES:
+        return {"price"}
+    return set()
 
 
 def auto_allowed(cell_value: str) -> bool:
-    """Sheet-in P sütunundakı dəyər avtomatik dəyişikliyə icazə verirmi?"""
-    return str(cell_value or "").strip().lower() in AUTO_ALLOW_VALUES
+    """Geriyə uyğunluq — hər hansı avtomatikaya icazə varmı?"""
+    return bool(auto_modes(cell_value))
 
 # eBay səhifəsi neçə gündən bir tam yenilənsin.
 # Öz listinginizin qiymətini siz təyin etdiyiniz üçün tez-tez oxumağa ehtiyac yoxdur —

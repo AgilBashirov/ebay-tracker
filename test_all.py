@@ -16,6 +16,10 @@ sys.path[:0] = [os.path.dirname(os.path.abspath(__file__)),
 os.environ.setdefault("EBAY_AD_RATE_PCT", "4")
 os.environ.setdefault("SALES_TAX_PCT", "10")
 os.environ.setdefault("EBAY_FVF_PCT", "13.6")
+# ebayfeescalculator.com-da "Oversea sales? No" seçilib — yəni beynəlxalq haqq
+# modelə daxil deyil. Müqayisənin düz olması üçün burada da 0 qoyuruq.
+# Azərbaycan haqqı (1.30%) ayrıca test_automation.py-də yoxlanılır.
+os.environ.setdefault("EBAY_INTERNATIONAL_PCT", "0")
 
 PASS, FAIL = [], []
 
@@ -89,15 +93,25 @@ for v, exp in [(32.99, 32.99), (32.30, 32.99), (33.00, 33.99),
 # ===========================================================================
 section("4. TÖVSİYƏ OLUNAN QİYMƏT")
 # ===========================================================================
+# Təklif artıq DOLLAR hədəfi ilə hesablanır (config.PROFIT_TIERS).
 s = pricing.suggest_ebay_price(69.00, 42.95, 48.00)
-m = pricing.margin(s, 48.00)
-check("Amazon bahalaşanda marja bərpa olunur", m[1] >= config.MARGIN_ALERT_PCT, True)
+m_usd, _ = pricing.margin(s, 48.00)
+hedef = pricing.target_profit_for(48.00)
+check("Amazon bahalaşanda hədəf qazanc bərpa olunur", m_usd >= hedef, True)
+check("təklif mövcud qiymətdən yuxarıdır", s > 48.00, True)
+
 s2 = pricing.suggest_ebay_price(48.77, None, 39.95)
-m2 = pricing.margin(s2, 39.95)
-check("az marjalı məhsulda hədd bərpa olunur", m2[1] >= config.MARGIN_ALERT_PCT, True)
-check("az marjalı təklif mövcud qiymətdən yuxarıdır", s2 > 48.77, True)
+m2_usd, _ = pricing.margin(s2, 39.95)
+check("az qazanclı məhsulda hədəf bərpa olunur",
+      m2_usd >= pricing.target_profit_for(39.95), True)
+check("az qazanclı təklif mövcud qiymətdən yuxarıdır", s2 > 48.77, True)
+
+# Amazon dəyişməyibsə də təklif hədəf qazanca əsaslanır — cari qiymətdən
+# asılı deyil. Yoxlanılan şey: təklif həmişə hədəfi ödəyir.
 s3 = pricing.suggest_ebay_price(69.00, 42.95, 42.95)
-check("dəyişiklik yoxdursa təklif eyni qalır", abs(s3 - 69.00) < 1.01, True)
+m3_usd, _ = pricing.margin(s3, 42.95)
+check("təklif həmişə hədəf qazancı ödəyir",
+      m3_usd >= pricing.target_profit_for(42.95), True)
 
 # ===========================================================================
 section("5. AMAZON SƏHİFƏSİNİN OXUNMASI")
@@ -330,7 +344,7 @@ check("sətir 4 (stok bitib) → STOK YOX", st.get(4), "STOK YOX")
 check("sətir 5 (bitib, eBay bağlı) → səssiz status",
       st.get(5), "STOK YOX (eBay bağlı)")
 check("sətir 6 (sabit) → OK", st.get(6), "OK")
-check("sətir 7 (az marja) → AZ MARJA", st.get(7), "AZ MARJA")
+check("sətir 7 (qazanc $5-dən az) → AZ QAZANC", st.get(7), "AZ QAZANC")
 
 msg = SENT[0] if SENT else ""
 check("Telegram-a 1 toplu mesaj", len(SENT), 1)

@@ -24,6 +24,10 @@ import scraper
 import sheets
 
 
+# Hesabata düşməməli olan "normal" səbəblər — bunlar problem deyil.
+NOISE_SKIPS = {"dəyişiklik lazım deyil"}
+
+
 class _NoBrowser:
     """API rejimi üçün boş brauzer — Chromium açılmır."""
 
@@ -76,6 +80,7 @@ def run(health_report: bool = False) -> int:
     processed = 0
     ebay_fetches = 0
     auto_actions = []
+    low_profit = []
 
     # API rejimi: birbaşa Amazon-a dəymirik.
     # "api" seçilibsə əvvəldən, "auto"da isə ilk bloklamadan sonra aktivləşir.
@@ -168,6 +173,9 @@ def run(health_report: bool = False) -> int:
 
             ebay_price = row["ebay_price"]
             ebay_qty = row["ebay_qty"]
+            # Qiymət bu işləmədə eBay-dən oxundumu? Köhnə sheet dəyəri ilə
+            # avtomatik qiymət dəyişikliyi etmək təhlükəlidir.
+            ebay_price_fresh = False
 
             # --- eBay Browse API (varsa) — ən etibarlı və pulsuz mənbə ---
             if ebay_api.is_configured():
@@ -175,6 +183,7 @@ def run(health_report: bool = False) -> int:
                 if info:
                     if info["price"]:
                         ebay_price = info["price"]
+                        ebay_price_fresh = True
                     if info["qty"] is not None:
                         ebay_qty = info["qty"]
                     dq = "dəqiq" if info["qty_exact"] else f"≥{info['qty']}"
@@ -189,6 +198,7 @@ def run(health_report: bool = False) -> int:
                         browser, row["ebay_link"], api_mode=api_mode)
                     if fb["price"]:
                         ebay_price = fb["price"]
+                        ebay_price_fresh = True
                         print(f"    ↩️  eBay qiyməti səhifədən: {_m(ebay_price)}")
                     ebay_fetches += 1
 
@@ -200,6 +210,7 @@ def run(health_report: bool = False) -> int:
                 )
                 if info["price"]:
                     ebay_price = info["price"]
+                    ebay_price_fresh = True
                 # Say yalnız "scrape" rejimində scraper-dən götürülür.
                 # Defolt rejimdə E sütunundakı sizin dəyəriniz qorunur.
                 if info["qty"] is not None:
@@ -219,7 +230,7 @@ def run(health_report: bool = False) -> int:
             suggested = pricing.suggest_ebay_price(ebay_price, amazon_old, amazon_new)
             status, should_alert, reason = pricing.classify(
                 ebay_price, amazon_old, amazon_new, data.in_stock, m_pct,
-                ebay_qty, data.qty
+                ebay_qty, data.qty, margin_usd=m_usd
             )
 
             next_check = _next_check(row, status, price_changed)
@@ -255,26 +266,98 @@ def run(health_report: bool = False) -> int:
             else:
                 stats["changed"] += 1
 
-            # --- Avtomatik sayı sıfırlama (Amazon-da stok bitibsə) ---
-            if (reason == pricing.REASON_OUT_OF_STOCK
-                    and config.AUTO_ZERO_QTY
-                    and ebay_write.is_configured()
-                    and config.auto_allowed(row.get("auto"))):
+            # --- AVTOMATİK İDARƏETMƏ (say + qiymət) ---
+            modes = config.auto_modes(row.get("auto"))
+            if modes and ebay_write.is_configured():
                 item_id = ebay_api.extract_item_id(row["ebay_link"])
-                res = ebay_write.zero_out(item_id, ebay_qty, config.AUTO_DRY_RUN)
-                if res["done"]:
-                    ebay_qty = 0
-                    record["ebay_qty"] = 0
-                    print(f"    ✅ eBay sayı 0 edildi ({item_id})")
-                elif res["skipped"]:
-                    print(f"    ⏭  Sayı sıfırlamadım: {res['skipped']}")
-                else:
-                    print(f"    🧪 {res['message']}")
-                auto_actions.append({
-                    "name": record["product_name"], "item_id": item_id,
-                    "qty_before": row.get("ebay_qty"),
-                    **res,
-                })
+
+                # 1) Say planı
+                want_qty = None
+                if "qty" in modes:
+                    if config.AUTO_QTY:
+                        want_qty = pricing.desired_qty(data.in_stock, data.qty)
+                    elif config.AUTO_ZERO_QTY and not data.in_stock:
+                        want_qty = 0   # köhnə rejim: yalnız sıfırlama
+
+                # 2) Qiymət planı
+                plan = None
+                want_price = None
+                if "price" in modes and config.AUTO_PRICE:
+                    if not ebay_price_fresh:
+                        # Sheet-dəki qiymət köhnəlmiş ola bilər — əlinizlə
+                        # dəyişdiyiniz qiyməti səhvən geri qaytarmayaq.
+                        print("    💲 Qiymətə toxunulmadı: eBay qiyməti bu "
+                              "işləmədə oxunmayıb")
+                    else:
+                        plan = pricing.plan_price_change(
+                            ebay_price, amazon_new, data.in_stock)
+                        want_price = plan["new_price"]
+                        if want_price is None and plan["reason"]:
+                            print(f"    💲 Qiymət toxunulmadı: {plan['reason']}")
+
+                if want_qty is not None or want_price is not None:
+                    res = ebay_write.apply_changes(
+                        item_id, ebay_qty, ebay_price,
+                        want_qty, want_price, config.AUTO_DRY_RUN)
+
+                    if res["done"]:
+                        print(f"    ✅ eBay yeniləndi: {res['message']}")
+                        if res["qty_after"] is not None:
+                            ebay_qty = res["qty_after"]
+                            record["ebay_qty"] = ebay_qty
+                        if res["price_after"] is not None:
+                            ebay_price = res["price_after"]
+                            record["ebay_price"] = ebay_price
+                            # Qiymət dəyişdi — marja və haqları yenidən hesabla
+                            m_usd, m_pct = pricing.margin(ebay_price, amazon_new)
+                            record["margin_usd"] = m_usd
+                            record["margin_pct"] = m_pct
+                            record["ebay_fee"] = pricing.total_fees(ebay_price)
+                        # Bot vəziyyəti düzəltdi — status da yenilənməlidir,
+                        # əks halda sheet-də "AZ QAZANC" qalır, halbuki həll olunub.
+                        status, should_alert, reason = pricing.classify(
+                            ebay_price, amazon_old, amazon_new, data.in_stock,
+                            m_pct, ebay_qty, data.qty, margin_usd=m_usd)
+                        record["status"] = status
+                        record["reason"] = reason
+                        record["next_check"] = _next_check(
+                            row, status, price_changed)
+                        record["auto_log"] = f"{_stamp()} {res['message']}"
+                    elif res["skipped"] and res["skipped"] not in NOISE_SKIPS:
+                        print(f"    ⏭  Toxunulmadı: {res['skipped']}")
+                        record["auto_log"] = f"{_stamp()} ⏭ {res['skipped']}"
+                    elif res["message"]:
+                        print(f"    🧪 {res['message']}")
+                        record["auto_log"] = f"{_stamp()} {res['message']}"
+
+                    # Hesabata YALNIZ real hadisə düşür:
+                    #   • dəyişiklik edildi
+                    #   • quru rejimdə ediləcəkdi
+                    #   • qoruyucu maneə oldu (izah lazımdır)
+                    # "dəyişiklik lazım deyil" normal haldır — Telegram-ı
+                    # hər işləmədə onlarla belə sətirlə doldurmaq olmaz.
+                    if res["done"] or res["message"] or (
+                            res["skipped"] and res["skipped"] not in NOISE_SKIPS):
+                        auto_actions.append({
+                            "name": record["product_name"], "item_id": item_id,
+                            "plan": plan, **res,
+                        })
+
+                # Hədəf qazanca çatılmırsa xəbər verək
+                # (qiymət dəyişsə də, dəyişməsə də)
+                if plan and plan.get("below_min"):
+                    low_profit.append({
+                        "name": record["product_name"],
+                        "new_price": plan.get("new_price"),
+                        "new_profit": plan.get("new_profit"),
+                        "current_price": ebay_price,
+                        "current_profit": plan.get("current_profit"),
+                        "amazon_price": amazon_new,
+                        "target": plan["target_profit"],
+                        "reason": plan.get("reason", ""),
+                        "ebay_link": row["ebay_link"],
+                        "amazon_link": row["amazon_link"],
+                    })
 
             if should_alert:
                 alerts.append(
@@ -282,6 +365,9 @@ def run(health_report: bool = False) -> int:
                         **record,
                         "ebay_link": row["ebay_link"],
                         "amazon_link": row["amazon_link"],
+                        # Qiymət avtomatik tətbiq olunubsa təklifi təkrarlamırıq
+                        "auto_applied": bool(record.get("auto_log")
+                                             and "qiymət" in record.get("auto_log", "")),
                     }
                 )
 
@@ -299,6 +385,9 @@ def run(health_report: bool = False) -> int:
 
     if auto_actions:
         notify.send(notify.format_auto_actions(auto_actions, config.AUTO_DRY_RUN))
+
+    if low_profit:
+        notify.send(notify.format_low_profit(low_profit))
     else:
         print("Dəyişiklik yoxdur — Telegram bildirişi göndərilmir.")
 
@@ -349,6 +438,10 @@ def _base(row):
         "ebay_fee": None,
         "auto": row.get("auto", ""),
     }
+
+
+def _stamp() -> str:
+    return datetime.utcnow().strftime("%d.%m %H:%M")
 
 
 def _m(v):

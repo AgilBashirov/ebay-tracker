@@ -1,7 +1,10 @@
 """
 eBay listinqinə YAZMA əməliyyatları (Trading API).
 
-HAZIRDA YALNIZ BİR ƏMƏLİYYAT: Amazon-da stok bitəndə eBay sayını 0 etmək.
+ƏMƏLİYYATLAR:
+  • Sayın dəyişdirilməsi (0 = satışdan çıxarmaq, listinq sağ qalır)
+  • Qiymətin dəyişdirilməsi
+Hər ikisi bir sorğuda gedə bilir (ReviseInventoryStatus).
 
 TƏHLÜKƏSİZLİK QATLARI (səhv bahalı olduğu üçün):
   1. Quru rejim (AUTO_DRY_RUN=1) — defolt. Nə edəcəyini yazır, dəyişmir.
@@ -99,15 +102,105 @@ def out_of_stock_control_enabled() -> bool | None:
     return enabled
 
 
-def set_quantity(item_id: str, quantity: int) -> tuple[bool, str]:
-    """Listinqin sayını dəyişir (ReviseInventoryStatus)."""
-    inner = (
-        "<InventoryStatus>"
-        f"<ItemID>{item_id}</ItemID>"
-        f"<Quantity>{int(quantity)}</Quantity>"
-        "</InventoryStatus>"
-    )
+def revise(item_id: str, quantity: int | None = None,
+           price: float | None = None) -> tuple[bool, str]:
+    """
+    Say və/və ya qiyməti bir sorğuda dəyişir (ReviseInventoryStatus).
+    İkisini birlikdə göndərmək bir sorğuya qənaət edir (eBay Trading API-nin
+    gündəlik çağırış limiti var — developer.ebay.com panelində görünür).
+    """
+    parts = [f"<ItemID>{item_id}</ItemID>"]
+    if quantity is not None:
+        parts.append(f"<Quantity>{int(quantity)}</Quantity>")
+    if price is not None:
+        parts.append(f"<StartPrice>{float(price):.2f}</StartPrice>")
+    if len(parts) == 1:
+        return False, "dəyişdiriləcək heç nə göstərilmədi"
+    inner = "<InventoryStatus>" + "".join(parts) + "</InventoryStatus>"
     return _call("ReviseInventoryStatus", inner)
+
+
+def set_quantity(item_id: str, quantity: int) -> tuple[bool, str]:
+    """Yalnız sayı dəyişir (geriyə uyğunluq)."""
+    return revise(item_id, quantity=quantity)
+
+
+def set_price(item_id: str, price: float) -> tuple[bool, str]:
+    """Yalnız qiyməti dəyişir."""
+    return revise(item_id, price=price)
+
+
+def apply_changes(item_id: str, current_qty: int | None, current_price: float | None,
+                  new_qty: int | None, new_price: float | None,
+                  dry_run: bool) -> dict:
+    """
+    Bir listinqdə say və/və ya qiyməti dəyişir. Bütün qoruyucular buradadır.
+
+    Qaytarır:
+      {"done": bool, "skipped": str|None, "message": str,
+       "qty_before","qty_after","price_before","price_after"}
+    """
+    res = {"done": False, "skipped": None, "message": "",
+           "qty_before": current_qty, "qty_after": None,
+           "price_before": current_price, "price_after": None}
+
+    if not item_id:
+        res["skipped"] = "listinq nömrəsi tapılmadı"
+        return res
+
+    # --- Say: dəyişməyibsə göndərmirik ---
+    if new_qty is not None and current_qty is not None and int(new_qty) == int(current_qty):
+        new_qty = None
+
+    # --- Qiymət: dəyişməyibsə göndərmirik ---
+    if (new_price is not None and current_price is not None
+            and abs(new_price - current_price) < 0.01):
+        new_price = None
+
+    if new_qty is None and new_price is None:
+        res["skipped"] = "dəyişiklik lazım deyil"
+        return res
+
+    # --- Sayı 0 etmək yalnız "Out of Stock Control" aktivdirsə ---
+    # Ayar bağlı olanda 0 qoymaq listinqi BAĞLAYIR və satış tarixçəsi itir.
+    if new_qty is not None and int(new_qty) == 0:
+        pref = out_of_stock_control_enabled()
+        if pref is not True:
+            reason = ("'Multi-quantity listings' ayarı eBay-də AKTİV DEYİL"
+                      if pref is False else "ayarın vəziyyəti öyrənilə bilmədi")
+            if new_price is None:
+                res["skipped"] = reason
+                return res
+            # Qiyməti dəyişə bilərik, sayı yox
+            new_qty = None
+            res["skipped"] = f"say dəyişmədi ({reason})"
+
+    if new_price is not None and float(new_price) <= 0:
+        res["skipped"] = "qiymət sıfır və ya mənfi ola bilməz"
+        return res
+
+    parts = []
+    if new_qty is not None:
+        parts.append(f"say {current_qty} → {new_qty}")
+    if new_price is not None:
+        parts.append(f"qiymət ${current_price:.2f} → ${new_price:.2f}"
+                     if current_price else f"qiymət ${new_price:.2f}")
+    summary = ", ".join(parts)
+
+    if dry_run:
+        res["message"] = f"[QURU REJİM] {summary}"
+        return res
+
+    ok, msg = revise(item_id, quantity=new_qty, price=new_price)
+    if not ok:
+        res["skipped"] = f"eBay xətası: {msg}"
+        return res
+
+    res["done"] = True
+    res["qty_after"] = new_qty
+    res["price_after"] = new_price
+    res["message"] = summary
+    return res
 
 
 def zero_out(item_id: str, current_qty: int | None, dry_run: bool) -> dict:
@@ -132,7 +225,7 @@ def zero_out(item_id: str, current_qty: int | None, dry_run: bool) -> dict:
         return {"done": False, "skipped": None,
                 "message": f"[QURU REJİM] {item_id} → say 0 ediləcəkdi"}
 
-    ok, msg = set_quantity(item_id, 0)
+    ok, msg = revise(item_id, quantity=0)
     if ok:
         return {"done": True, "skipped": None, "message": f"{item_id} → say 0"}
     return {"done": False, "skipped": f"eBay xətası: {msg}", "message": ""}

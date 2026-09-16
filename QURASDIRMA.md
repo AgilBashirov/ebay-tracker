@@ -211,6 +211,89 @@ eBay listinginizdəki qalıq say nəzərə alınır ki, lazımsız bildiriş gə
 
 ---
 
+## Avtomatik idarəetmə (say + qiymət)
+
+Sistem eBay listinqlərinizi özü tənzimləyə bilər. **Hər şey defolt BAĞLIDIR** —
+açmaq üçün həm ümumi açar, həm də hər sətir üçün icazə lazımdır.
+
+### İki qat icazə
+
+1. **Ümumi açar** — GitHub Variables: `AUTO_QTY=1` və/və ya `AUTO_PRICE=1`
+2. **Sətir icazəsi** — sheet-in **P sütunu** ("Avto"):
+
+| P sütununa yazın | Nə olur |
+|---|---|
+| `beli` | həm say, həm qiymət avtomatik |
+| `say` | yalnız say |
+| `qiymet` | yalnız qiymət |
+| boş | heç nəyə toxunulmur |
+
+Üstəlik `AUTO_DRY_RUN=1` (defolt) olduqda sistem **heç nəyi dəyişmir**, yalnız
+nə edəcəyini Telegram-a yazır. Bir neçə gün baxıb əmin olandan sonra `0` edin.
+
+### Say necə tənzimlənir
+
+| Amazon vəziyyəti | eBay sayınız |
+|---|---|
+| Stok yoxdur | **0** — listinq bağlanmır, tarixçə qalır |
+| 10-dan az qalıb | **1** — çatdıra bilməyəcəyiniz sifariş gəlməsin |
+| 10+ və ya say bilinmir | **3** |
+
+Amazon qalıq sayı yalnız azaldıqda ("Only N left in stock") göstərir.
+Göstərmirsə ehtiyat kifayətdir sayılır.
+
+Stok bərpa olunanda say avtomatik 0-dan 3-ə qayıdır.
+
+> ⚠️ Sayın 0 edilməsi üçün eBay-də **"Multi-quantity listings — Listings stay
+> active when you're out of stock"** ayarı AÇIQ olmalıdır. Bağlıdırsa sistem
+> saya toxunmur (əks halda listinq bağlanar və satış tarixçəniz itər).
+
+### Qiymət necə tənzimlənir
+
+Meyar faiz marjası deyil, **hər satışdan əlinizə keçən təmiz dollar**:
+
+| Amazon qiyməti | Hədəf təmiz qazanc |
+|---|---|
+| $20-a qədər | $5 |
+| $20 – $50 | $7 |
+| $50-dən yuxarı | $10 |
+
+`PROFIT_TIERS` dəyişəni ilə dəyişdirilə bilər: `20:5,50:7,1000000:10`
+
+Qoruyucular:
+
+- Qazanc hədəfin ətrafındadırsa **toxunulmur** (hədəfdən $2-a qədər çox ola bilər)
+- Bir işləmədə qiymət maksimum **+50% / −25%** dəyişir
+- $0.50-dən kiçik fərqə görə dəyişiklik edilmir
+- **Heç vaxt zərərinə satış olmur** — hədəfə çatmaq üçün qiymət həddindən çox
+  qaldırılmalıdırsa dəyişiklik edilmir, Telegram-a xəbərdarlıq gedir
+
+### Q sütunu — audit izi
+
+Bot nə etdiyini sheet-in **Q sütununa** yazır:
+`16.09 20:06 say 8 → 3, qiymət $60.99 → $67.99`
+
+Beləliklə hər dəyişikliyi sonradan yoxlaya bilərsiniz.
+
+---
+
+## Azərbaycan satıcısı üçün haqlar
+
+eBay-in rəsmi cədvəlinə görə (International fees for eBay global sellers)
+Azərbaycan **"Europe Unsited (excl. EU)"** qrupundadır:
+
+| Haqq | Dərəcə | Nə vaxt |
+|---|---|---|
+| Final Value Fee | 13.6% + $0.40 | hər satışda |
+| Promoted Listings | sizin dərəcəniz | reklam işlədirsinizsə |
+| **Beynəlxalq haqq** | **1.30%** | alıcı Azərbaycandan kənardadırsa (yəni həmişə) |
+| Valyuta çevrilişi | 3.0% | ödəniş USD-dən başqa valyutaya çevrilirsə |
+
+Hamısı **vergi daxil bazadan** hesablanır — yəni alıcıdan alınan satış vergisi
+sizə çatmasa da haqqınızı artırır.
+
+---
+
 ## Ayarlar
 
 Repo → **Settings** → **Secrets and variables** → **Actions** → **Variables** bölməsi

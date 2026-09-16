@@ -58,35 +58,53 @@ jobs:
           SHEET_ID: ${{ secrets.SHEET_ID }}
           SCRAPERAPI_KEY: ${{ secrets.SCRAPERAPI_KEY }}
           SCRAPINGBEE_KEY: ${{ secrets.SCRAPINGBEE_KEY }}
-          SCRAPE_METHOD: ${{ vars.SCRAPE_METHOD || 'auto' }}
+          SCRAPE_METHOD: ${{ vars.SCRAPE_METHOD || secrets.SCRAPE_METHOD || 'auto' }}
           EBAY_CLIENT_ID: ${{ secrets.EBAY_CLIENT_ID }}
           EBAY_CLIENT_SECRET: ${{ secrets.EBAY_CLIENT_SECRET }}
-          EBAY_MARKETPLACE: ${{ vars.EBAY_MARKETPLACE || 'EBAY_US' }}
+          EBAY_MARKETPLACE: ${{ vars.EBAY_MARKETPLACE || secrets.EBAY_MARKETPLACE || 'EBAY_US' }}
           EBAY_DEV_ID: ${{ secrets.EBAY_DEV_ID }}
           EBAY_AUTH_TOKEN: ${{ secrets.EBAY_AUTH_TOKEN }}
-          AUTO_ZERO_QTY: ${{ vars.AUTO_ZERO_QTY || '0' }}
-          AUTO_DRY_RUN: ${{ vars.AUTO_DRY_RUN || '1' }}
-          ALERT_ON_PRICE_RISE: ${{ vars.ALERT_ON_PRICE_RISE || '1' }}
-          ALERT_ON_LOW_QTY: ${{ vars.ALERT_ON_LOW_QTY || '1' }}
-          ALERT_ON_OUT_OF_STOCK: ${{ vars.ALERT_ON_OUT_OF_STOCK || '1' }}
-          ALERT_ON_LOW_MARGIN: ${{ vars.ALERT_ON_LOW_MARGIN || '0' }}
-          ALERT_ON_RESTOCK: ${{ vars.ALERT_ON_RESTOCK || '0' }}
-          EBAY_FVF_PCT: ${{ vars.EBAY_FVF_PCT || '13.6' }}
-          EBAY_AD_RATE_PCT: ${{ vars.EBAY_AD_RATE_PCT || '0' }}
-          SALES_TAX_PCT: ${{ vars.SALES_TAX_PCT || '10' }}
-          CHECK_INTERVAL_DAYS: ${{ vars.CHECK_INTERVAL_DAYS || '1' }}
-          EBAY_REFRESH_DAYS: ${{ vars.EBAY_REFRESH_DAYS || '10' }}
-          EBAY_LOW_QTY: ${{ vars.EBAY_LOW_QTY || '2' }}
+          AUTO_ZERO_QTY: ${{ vars.AUTO_ZERO_QTY || secrets.AUTO_ZERO_QTY || '0' }}
+          AUTO_DRY_RUN: ${{ vars.AUTO_DRY_RUN || secrets.AUTO_DRY_RUN || '1' }}
+          # --- Avtomatik say idarəsi ---
+          AUTO_QTY: ${{ vars.AUTO_QTY || secrets.AUTO_QTY || '0' }}
+          QTY_PLENTY_THRESHOLD: ${{ vars.QTY_PLENTY_THRESHOLD || secrets.QTY_PLENTY_THRESHOLD || '10' }}
+          QTY_WHEN_PLENTY: ${{ vars.QTY_WHEN_PLENTY || secrets.QTY_WHEN_PLENTY || '3' }}
+          QTY_WHEN_LOW: ${{ vars.QTY_WHEN_LOW || secrets.QTY_WHEN_LOW || '1' }}
+          # --- Avtomatik qiymət idarəsi ---
+          AUTO_PRICE: ${{ vars.AUTO_PRICE || secrets.AUTO_PRICE || '0' }}
+          PROFIT_TIERS: ${{ vars.PROFIT_TIERS || secrets.PROFIT_TIERS || '20:5,50:7,1000000:10' }}
+          MIN_PROFIT_USD: ${{ vars.MIN_PROFIT_USD || secrets.MIN_PROFIT_USD || '5' }}
+          AUTO_PRICE_ALLOW_DOWN: ${{ vars.AUTO_PRICE_ALLOW_DOWN || secrets.AUTO_PRICE_ALLOW_DOWN || '1' }}
+          AUTO_PRICE_DOWN_TOLERANCE: ${{ vars.AUTO_PRICE_DOWN_TOLERANCE || secrets.AUTO_PRICE_DOWN_TOLERANCE || '2.00' }}
+          AUTO_PRICE_UP_TOLERANCE: ${{ vars.AUTO_PRICE_UP_TOLERANCE || secrets.AUTO_PRICE_UP_TOLERANCE || '0.25' }}
+          AUTO_PRICE_MAX_UP_PCT: ${{ vars.AUTO_PRICE_MAX_UP_PCT || secrets.AUTO_PRICE_MAX_UP_PCT || '50' }}
+          AUTO_PRICE_MAX_DOWN_PCT: ${{ vars.AUTO_PRICE_MAX_DOWN_PCT || secrets.AUTO_PRICE_MAX_DOWN_PCT || '25' }}
+          AUTO_PRICE_MIN_DIFF_USD: ${{ vars.AUTO_PRICE_MIN_DIFF_USD || secrets.AUTO_PRICE_MIN_DIFF_USD || '0.50' }}
+          # --- Azərbaycan satıcısı üçün haqlar ---
+          EBAY_INTERNATIONAL_PCT: ${{ vars.EBAY_INTERNATIONAL_PCT || secrets.EBAY_INTERNATIONAL_PCT || '1.30' }}
+          EBAY_FX_PCT: ${{ vars.EBAY_FX_PCT || secrets.EBAY_FX_PCT || '0' }}
+          ALERT_ON_PRICE_RISE: ${{ vars.ALERT_ON_PRICE_RISE || secrets.ALERT_ON_PRICE_RISE || '1' }}
+          ALERT_ON_LOW_QTY: ${{ vars.ALERT_ON_LOW_QTY || secrets.ALERT_ON_LOW_QTY || '1' }}
+          ALERT_ON_OUT_OF_STOCK: ${{ vars.ALERT_ON_OUT_OF_STOCK || secrets.ALERT_ON_OUT_OF_STOCK || '1' }}
+          ALERT_ON_LOW_MARGIN: ${{ vars.ALERT_ON_LOW_MARGIN || secrets.ALERT_ON_LOW_MARGIN || '0' }}
+          ALERT_ON_RESTOCK: ${{ vars.ALERT_ON_RESTOCK || secrets.ALERT_ON_RESTOCK || '0' }}
+          EBAY_FVF_PCT: ${{ vars.EBAY_FVF_PCT || secrets.EBAY_FVF_PCT || '13.6' }}
+          EBAY_AD_RATE_PCT: ${{ vars.EBAY_AD_RATE_PCT || secrets.EBAY_AD_RATE_PCT || '0' }}
+          SALES_TAX_PCT: ${{ vars.SALES_TAX_PCT || secrets.SALES_TAX_PCT || '10' }}
+          CHECK_INTERVAL_DAYS: ${{ vars.CHECK_INTERVAL_DAYS || secrets.CHECK_INTERVAL_DAYS || '1' }}
+          EBAY_REFRESH_DAYS: ${{ vars.EBAY_REFRESH_DAYS || secrets.EBAY_REFRESH_DAYS || '10' }}
+          EBAY_LOW_QTY: ${{ vars.EBAY_LOW_QTY || secrets.EBAY_LOW_QTY || '2' }}
           BATCH_SIZE: ${{ github.event.inputs.batch_size || vars.BATCH_SIZE || 'auto' }}
-          MARGIN_ALERT_PCT: ${{ vars.MARGIN_ALERT_PCT || '15' }}
-          PRICE_RISE_MIN_USD: ${{ vars.PRICE_RISE_MIN_USD || '0.50' }}
-          PRICE_RISE_MIN_PCT: ${{ vars.PRICE_RISE_MIN_PCT || '2.0' }}
-          EBAY_FEE_PCT: ${{ vars.EBAY_FEE_PCT || '13.25' }}
-          TARGET_MARGIN_PCT: ${{ vars.TARGET_MARGIN_PCT || '0' }}
-          EBAY_PRICE_SOURCE: ${{ vars.EBAY_PRICE_SOURCE || 'scrape' }}
-          ALERT_ON_PRICE_DROP: ${{ vars.ALERT_ON_PRICE_DROP || '0' }}
-          DELAY_MIN_SEC: ${{ vars.DELAY_MIN_SEC || '8' }}
-          DELAY_MAX_SEC: ${{ vars.DELAY_MAX_SEC || '22' }}
+          MARGIN_ALERT_PCT: ${{ vars.MARGIN_ALERT_PCT || secrets.MARGIN_ALERT_PCT || '15' }}
+          PRICE_RISE_MIN_USD: ${{ vars.PRICE_RISE_MIN_USD || secrets.PRICE_RISE_MIN_USD || '0.50' }}
+          PRICE_RISE_MIN_PCT: ${{ vars.PRICE_RISE_MIN_PCT || secrets.PRICE_RISE_MIN_PCT || '2.0' }}
+          EBAY_FEE_PCT: ${{ vars.EBAY_FEE_PCT || secrets.EBAY_FEE_PCT || '13.25' }}
+          TARGET_MARGIN_PCT: ${{ vars.TARGET_MARGIN_PCT || secrets.TARGET_MARGIN_PCT || '0' }}
+          EBAY_PRICE_SOURCE: ${{ vars.EBAY_PRICE_SOURCE || secrets.EBAY_PRICE_SOURCE || 'scrape' }}
+          ALERT_ON_PRICE_DROP: ${{ vars.ALERT_ON_PRICE_DROP || secrets.ALERT_ON_PRICE_DROP || '0' }}
+          DELAY_MIN_SEC: ${{ vars.DELAY_MIN_SEC || secrets.DELAY_MIN_SEC || '8' }}
+          DELAY_MAX_SEC: ${{ vars.DELAY_MAX_SEC || secrets.DELAY_MAX_SEC || '22' }}
           PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/src
         run: python src/main.py
 

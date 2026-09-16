@@ -14,6 +14,7 @@ CATEGORIES = [
     ("QIYMET+",    "📈 Amazon qiyməti artıb",       True),
     ("QIYMET-",    "📉 Amazon qiyməti düşüb",       False),
     ("AZ MARJA",   "⚠️ Marja azdır",                True),
+    ("AZ QAZANC",  f"⚠️ Qazanc ${config.MIN_PROFIT_USD:.0f}-dən azdır", True),
     ("AZ STOK",    "📦 Amazon-da say azalıb",       True),
     ("STOK YOX (eBay bağlı)", "⚪ Stok yox (listing bağlı)", False),
     ("STOK YOX",   "🔴 Amazon-da stok bitib",       True),

@@ -128,9 +128,13 @@ def format_alerts(alerts: list[dict]) -> str:
                 lines.append(f"   Sizin eBay qiyməti: {_money(ebay)}")
             if m_usd is not None:
                 lines.append(f"   Yeni marja: <b>{_money(m_usd)}</b> ({m_pct:.1f}%)")
-            sug = a.get("suggested_ebay")
-            if sug is not None and ebay is not None and abs(sug - ebay) >= 0.01:
-                lines.append(f"   💡 <b>Tövsiyə: eBay qiymətini {_money(sug)} edin</b>")
+            if a.get("auto_applied"):
+                lines.append("   🤖 <i>Qiymət avtomatik tənzimləndi</i>")
+            else:
+                sug = a.get("suggested_ebay")
+                if sug is not None and ebay is not None and abs(sug - ebay) >= 0.01:
+                    lines.append(
+                        f"   💡 <b>Tövsiyə: eBay qiymətini {_money(sug)} edin</b>")
 
         # ---- Digər (defolt bağlıdır, amma açılarsa) ----
         else:
@@ -198,7 +202,7 @@ def format_health(stats: dict) -> str:
 
 
 def format_auto_actions(actions: list[dict], dry_run: bool) -> str:
-    """Avtomatik say sıfırlama əməliyyatlarının hesabatı."""
+    """eBay listinqlərində edilən (və ya ediləcək) avtomatik dəyişikliklər."""
     if dry_run:
         head = ("<b>🧪 QURU REJİM — heç nə dəyişdirilmədi</b>\n\n"
                 "Real rejimdə bunlar edilə bilərdi:")
@@ -208,19 +212,76 @@ def format_auto_actions(actions: list[dict], dry_run: bool) -> str:
     lines = [head, ""]
     for a in actions:
         name = _e((a.get("name") or "Adsız")[:55])
-        if a.get("done"):
-            lines.append(f"✅ <b>{name}</b>")
-            lines.append(f"   eBay sayı {a.get('qty_before')} → <b>0</b> edildi")
-        elif a.get("skipped"):
+        qb, qa = a.get("qty_before"), a.get("qty_after")
+        pb, pa = a.get("price_before"), a.get("price_after")
+        plan = a.get("plan") or {}
+
+        if a.get("skipped"):
             lines.append(f"⏭ <b>{name}</b>")
             lines.append(f"   Toxunulmadı: {_e(a['skipped'])}")
-        else:
-            lines.append(f"🧪 <b>{name}</b>")
-            lines.append(f"   Say {a.get('qty_before')} → 0 ediləcəkdi")
+            lines.append("")
+            continue
+
+        lines.append(("✅ " if a.get("done") else "🧪 ") + f"<b>{name}</b>")
+
+        # --- Say ---
+        if qa is not None and qa != qb:
+            if qa == 0:
+                lines.append(f"   📦 Say <b>{qb} → 0</b> (satışdan çıxarıldı, "
+                             f"listinq açıq qalır)")
+            elif qb in (0, None):
+                lines.append(f"   📦 Say <b>{qb if qb is not None else '—'} → {qa}</b> "
+                             f"(yenidən satışa qoyuldu)")
+            else:
+                lines.append(f"   📦 Say <b>{qb} → {qa}</b>")
+
+        # --- Qiymət ---
+        if pa is not None and pb is not None:
+            arrow = "📈" if pa > pb else "📉"
+            lines.append(f"   {arrow} Qiymət <b>{_money(pb)} → {_money(pa)}</b>")
+            if plan.get("new_profit") is not None:
+                lines.append(f"   💵 Təmiz qazanc: <b>{_money(plan['new_profit'])}</b> "
+                             f"(hədəf {_money(plan.get('target_profit'))})")
+        elif a.get("message") and not a.get("done"):
+            lines.append(f"   {_e(a['message'].replace('[QURU REJİM] ', ''))}")
+
+        if plan.get("capped"):
+            lines.append("   ⚠️ Təhlükəsizlik həddi tətbiq olundu "
+                         "(bir dəfəyə maksimum dəyişiklik)")
         lines.append("")
 
     if dry_run:
         lines.append("<i>Razısınızsa AUTO_DRY_RUN dəyişənini 0 edin.</i>")
+    return "\n".join(lines).strip()
+
+
+def format_low_profit(items: list[dict]) -> str:
+    """Qiymət qaldırılsa da hədəf qazanca çatmayan məhsullar."""
+    lines = ["<b>⚠️ Bu məhsullar artıq az qazanc verir</b>", ""]
+    for it in items:
+        name = _e((it.get("name") or "Adsız")[:55])
+        lines.append(f"<b>{name}</b>")
+        lines.append(f"   Amazon: {_money(it.get('amazon_price'))} · "
+                     f"eBay: {_money(it.get('current_price'))}")
+        if it.get("new_price"):
+            lines.append(f"   Yeni qiymət: <b>{_money(it['new_price'])}</b> → "
+                         f"qazanc {_money(it.get('new_profit'))} "
+                         f"(hədəf {_money(it.get('target'))})")
+        else:
+            lines.append(f"   Cari qazanc: <b>{_money(it.get('current_profit'))}</b> "
+                         f"(hədəf {_money(it.get('target'))})")
+            lines.append(f"   ⛔ Avtomatik düzəliş edilmədi — "
+                         f"{_e(it.get('reason', ''))}")
+        links = []
+        if it.get("ebay_link"):
+            links.append(f'<a href="{_e(it["ebay_link"])}">eBay</a>')
+        if it.get("amazon_link"):
+            links.append(f'<a href="{_e(it["amazon_link"])}">Amazon</a>')
+        if links:
+            lines.append("🔗 " + " · ".join(links))
+        lines.append("")
+    lines.append("<i>Başqa təchizatçı axtarmaq və ya listinqi dayandırmaq "
+                 "barədə düşünə bilərsiniz.</i>")
     return "\n".join(lines).strip()
 
 
