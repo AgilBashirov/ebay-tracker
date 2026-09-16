@@ -96,25 +96,37 @@ for v, exp in [(32.99, 32.99), (32.30, 32.99), (33.00, 33.99),
 # ===========================================================================
 section("4. TÖVSİYƏ OLUNAN QİYMƏT")
 # ===========================================================================
-# Təklif artıq DOLLAR hədəfi ilə hesablanır (config.PROFIT_TIERS).
-s = pricing.suggest_ebay_price(69.00, 42.95, 48.00)
-m_usd, _ = pricing.margin(s, 48.00)
-hedef = pricing.target_profit_for(48.00)
-check("Amazon bahalaşanda hədəf qazanc bərpa olunur", m_usd >= hedef, True)
-check("təklif mövcud qiymətdən yuxarıdır", s > 48.00, True)
+# Təklif DOLLAR hədəfi ilə hesablanır (config.PROFIT_TIERS) və yalnız
+# həqiqətən lazım olanda verilir — qazanc məqbul zonadadırsa boş qalır.
 
-s2 = pricing.suggest_ebay_price(48.77, None, 39.95)
-m2_usd, _ = pricing.margin(s2, 39.95)
-check("az qazanclı məhsulda hədəf bərpa olunur",
-      m2_usd >= pricing.target_profit_for(39.95), True)
-check("az qazanclı təklif mövcud qiymətdən yuxarıdır", s2 > 48.77, True)
+def _tovsiye_yoxla(ad, ebay, amazon, gozlenen_var):
+    sug = pricing.suggest_ebay_price(ebay, None, amazon)
+    cur, _ = pricing.margin(ebay, amazon)
+    hedef = pricing.target_profit_for(amazon)
+    check(f"{ad} (qazanc ${cur} · hədəf ${hedef:.0f}) → "
+          + ("təklif var" if gozlenen_var else "boş"),
+          sug is not None, gozlenen_var)
+    if sug is not None:
+        yeni, _ = pricing.margin(sug, amazon)
+        check(f"   təklif ${sug} hədəfi ödəyir", yeni >= hedef, True)
+    return sug
 
-# Amazon dəyişməyibsə də təklif hədəf qazanca əsaslanır — cari qiymətdən
-# asılı deyil. Yoxlanılan şey: təklif həmişə hədəfi ödəyir.
-s3 = pricing.suggest_ebay_price(69.00, 42.95, 42.95)
-m3_usd, _ = pricing.margin(s3, 42.95)
-check("təklif həmişə hədəf qazancı ödəyir",
-      m3_usd >= pricing.target_profit_for(42.95), True)
+
+# 1) Qazanc hədəfin altındadır → təklif olmalıdır
+_tovsiye_yoxla("az qazanc", 48.77, 39.95, True)
+
+# 2) Zərərdədir → təklif olmalıdır
+_tovsiye_yoxla("zərərdə", 45.00, 43.00, True)
+
+# 3) Qazanc məqbul zonadadır → təklif OLMAMALIDIR
+#    (əks halda sheet "qiyməti aşağı sal" yazır, avtomatika isə toxunmur)
+_hedef = pricing.target_profit_for(39.95)
+_yaxsi = round(pricing.price_for_profit(_hedef + 1.0, 39.95), 2)
+_tovsiye_yoxla("qazanc qaydasındadır", _yaxsi, 39.95, False)
+
+# 4) Qiymət həddindən çox yuxarıdır → aşağı salmaq təklif olunur
+_s4 = _tovsiye_yoxla("həddindən baha", 120.00, 39.95, True)
+check("   baha olanda təklif aşağı salır", _s4 < 120.00, True)
 
 # ===========================================================================
 section("5. AMAZON SƏHİFƏSİNİN OXUNMASI")

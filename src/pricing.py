@@ -195,7 +195,21 @@ def suggest_ebay_price(
         if p:
             candidates.append(p)
     else:
-        p = price_for_profit(target_profit_for(amazon_new), amazon_new)
+        target = target_profit_for(amazon_new)
+
+        # Cari qiymət onsuz da məqbul zonadadırsa TƏKLİF VERMİRİK.
+        # Boş xana = "toxunma, hər şey qaydasındadır" deməkdir.
+        # Əks halda sheet "qiyməti aşağı sal" yazır, avtomatika isə
+        # toxunmur — bir-birinə zidd iki siqnal alırdınız.
+        if ebay_price is not None:
+            cur, _ = margin(ebay_price, amazon_new)
+            if cur is not None and (
+                    target - config.AUTO_PRICE_UP_TOLERANCE
+                    <= cur
+                    <= target + config.AUTO_PRICE_DOWN_TOLERANCE):
+                return None
+
+        p = price_for_profit(target, amazon_new)
         if p:
             candidates.append(p)
 
