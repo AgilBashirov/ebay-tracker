@@ -285,6 +285,131 @@ def format_low_profit(items: list[dict]) -> str:
     return "\n".join(lines).strip()
 
 
+def _short(name, n=34):
+    name = (name or "Adsız").strip()
+    return _e(name if len(name) <= n else name[:n - 1] + "…")
+
+
+def format_run_summary(checked: int, total: int, actions: list[dict],
+                       alerts: list[dict], low_profit: list[dict],
+                       dry_run: bool, blocked: int = 0,
+                       block_reason: str | None = None) -> str:
+    """
+    Bir işləmənin YEGANƏ Telegram mesajı — qısa və konkret.
+
+    Əvvəllər eyni işləmədə 4-5 ayrı mesaj gedirdi (bildirişlər, avtomatik
+    əməliyyatlar, az qazanc, bloklama). İndi hamısı burada birləşir.
+    Dəyişiklik və diqqət tələb edən hal yoxdursa boş sətir qaytarılır —
+    yəni heç nə göndərilmir.
+    """
+    qiymet, say, maneə = [], [], []
+
+    for a in actions:
+        if a.get("skipped"):
+            maneə.append(f"• {_short(a.get('name'))} — {_e(a['skipped'])}")
+            continue
+        nm = _short(a.get("name"))
+        qb, qa = a.get("qty_before"), a.get("qty_after")
+        pb, pa = a.get("price_before"), a.get("price_after")
+        plan = a.get("plan") or {}
+
+        if dry_run and not a.get("done"):
+            # Quru rejim: nə ediləcəyi mətn kimi gəlir
+            msg = (a.get("message") or "").replace("[QURU REJİM] ", "")
+            if msg:
+                qiymet.append(f"• {nm} — {_e(msg)}")
+            continue
+
+        if pa is not None and pb is not None:
+            ox = "↑" if pa > pb else "↓"
+            qazanc = plan.get("new_profit")
+            son = f" · qazanc {_money(qazanc)}" if qazanc is not None else ""
+            qiymet.append(f"• {nm} — {_money(pb)} {ox} <b>{_money(pa)}</b>{son}")
+
+        if qa is not None and qa != qb:
+            if qa == 0:
+                say.append(f"• {nm} — {qb} → <b>0</b> (Amazon-da bitib)")
+            elif qb in (0, None):
+                say.append(f"• {nm} — {qb if qb is not None else '—'} → "
+                           f"<b>{qa}</b> (satışa qayıtdı)")
+            else:
+                say.append(f"• {nm} — {qb} → <b>{qa}</b>")
+
+    # Diqqət tələb edənlər: sistemin həll edə bilmədikləri
+    toxunulan = {(_short(a.get("name"))) for a in actions}
+    diqqet = []
+    for lp in low_profit:
+        diqqet.append(f"• {_short(lp.get('name'))} — qazanc "
+                      f"{_money(lp.get('current_profit'))}, "
+                      f"hədəf {_money(lp.get('target'))} tutmur")
+    for al in alerts:
+        nm = _short(al.get("product_name"))
+        if nm in toxunulan:
+            continue           # avtomatika onsuz da həll etdi
+        title = {"OUT_OF_STOCK": "Amazon-da stok bitib",
+                 "LOW_QTY": "Amazon-da say azdır",
+                 "PRICE_RISE": "Amazon bahalaşdı"}.get(al.get("reason"))
+        if title:
+            diqqet.append(f"• {nm} — {title}")
+
+    if not (qiymet or say or diqqet or maneə or blocked):
+        return ""
+
+    bas = ("🧪 <b>Quru rejim</b> — heç nə dəyişdirilmədi"
+           if dry_run else "<b>eBay yoxlaması</b>")
+    lines = [f"{bas}  ·  {checked}/{total} məhsul", ""]
+
+    def blok(basliq, items, limit=6):
+        if not items:
+            return
+        lines.append(f"<b>{basliq} ({len(items)})</b>")
+        lines.extend(items[:limit])
+        if len(items) > limit:
+            lines.append(f"<i>… və {len(items) - limit} daha</i>")
+        lines.append("")
+
+    blok("📈 Qiymət", qiymet)
+    blok("📦 Say", say)
+    blok("⚠️ Diqqət", diqqet)
+    blok("⛔ Toxunulmadı", maneə, 4)
+
+    if blocked:
+        lines.append(f"🛑 Amazon {blocked} məhsulu blokladı — "
+                     f"növbəti işləmədə təkrar yoxlanacaq")
+        lines.append("")
+
+    if dry_run:
+        lines.append("<i>Tətbiq etmək üçün AUTO_DRY_RUN = 0</i>")
+
+    return "\n".join(lines).strip()
+
+
+def format_could_lower(items: list[dict]) -> str:
+    """
+    Qazancı həddən xeyli çox olan məhsullar.
+    Bu, PROBLEM DEYİL — sadəcə istəsəniz ucuzlaşdırıb daha rəqabətli
+    ola biləcəyiniz məhsulların siyahısıdır. Sistem özü toxunmur.
+    """
+    lines = ["<b>💡 İstəsəniz ucuzlaşdıra bilərsiniz</b>",
+             "<i>Bunlar həddən yaxşı qazandırır — sistem toxunmadı. "
+             "Rəqabət üçün aşağı salmaq istəsəniz:</i>", ""]
+    for it in items[:15]:
+        name = _e((it.get("name") or "Adsız")[:48])
+        lines.append(f"<b>{name}</b>")
+        lines.append(f"   {_money(it.get('current_price'))} → "
+                     f"{_money(it.get('suggested'))}  ·  qazanc "
+                     f"{_money(it.get('current_profit'))} → "
+                     f"~{_money(it.get('floor'))}")
+        if it.get("ebay_link"):
+            lines.append(f'   🔗 <a href="{_e(it["ebay_link"])}">eBay</a>')
+        lines.append("")
+    if len(items) > 15:
+        lines.append(f"<i>… və daha {len(items) - 15} məhsul</i>")
+    lines.append("<i>Avtomatik ucuzlaşdırma istəyirsinizsə: "
+                 "AUTO_PRICE_ALLOW_DOWN = 1</i>")
+    return "\n".join(lines).strip()
+
+
 # Müvəqqəti (bizdən asılı olmayan) nasazlıq əlamətləri
 TRANSIENT_HINTS = [
     "503", "502", "500", "504", "429",

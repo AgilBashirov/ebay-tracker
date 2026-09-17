@@ -2,10 +2,20 @@
 Günlük sağlamlıq hesabatı — sheet-in mövcud vəziyyətini oxuyub Telegram-a xülasə göndərir.
 Scraping etmir, ona görə sürətli və risksizdir (API krediti xərcləmir).
 """
+import sys
 from datetime import datetime, timedelta
+
+# Windows konsolu (cp1252) Azərbaycan hərflərini çap edə bilmir.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        if (_stream.encoding or "").lower().replace("-", "") != "utf8":
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 import config
 import notify
+import pricing
 import sheets
 
 # Status → (hesabat başlığı, diqqət tələb edirmi)
@@ -41,6 +51,7 @@ def main():
 
     counts = {}
     attention = []   # diqqət tələb edən məhsullar (ad + status)
+    could_lower = []  # qazancı həddən xeyli çox olanlar (məsləhət)
     stale = 0
     total = 0
     missing_ebay_price = 0
@@ -65,6 +76,23 @@ def main():
         if not padded[config.COL["ebay_price"] - 1].strip():
             missing_ebay_price += 1
 
+        # Qazancı həddən xeyli çox olan məhsullar — məcburiyyət yoxdur, amma
+        # istəsə daha rəqabətli qiymət qoya bilər. Gündə bir dəfə xatırladırıq.
+        ep = _money(padded[config.COL["ebay_price"] - 1])
+        ap = _money(padded[config.COL["amazon_new"] - 1])
+        if ep and ap:
+            plan = pricing.plan_price_change(ep, ap)
+            if plan.get("could_lower") and not plan.get("new_price"):
+                could_lower.append({
+                    "name": padded[config.COL["product_name"] - 1].strip()
+                            or "(adsız)",
+                    "current_price": ep,
+                    "current_profit": plan.get("current_profit"),
+                    "suggested": plan["could_lower"],
+                    "floor": plan.get("target_profit"),
+                    "ebay_link": padded[config.COL["ebay_link"] - 1].strip(),
+                })
+
         last = padded[config.COL["last_check"] - 1].strip()
         if not last:
             stale += 1
@@ -79,8 +107,28 @@ def main():
         _build_message(counts, attention, total, stale, missing_ebay_price),
         silent=True,
     )
+
+    # Ayrıca, sakit mesaj: istəsə ucuzlaşdıra biləcəyi məhsullar.
+    # Ən çox "artıq" qazananlar öndə olsun.
+    if could_lower:
+        could_lower.sort(
+            key=lambda x: -(x["current_profit"] or 0))
+        notify.send(notify.format_could_lower(could_lower), silent=True)
+
     print({"total": total, "counts": counts, "stale": stale,
-           "missing_ebay_price": missing_ebay_price})
+           "missing_ebay_price": missing_ebay_price,
+           "could_lower": len(could_lower)})
+
+
+def _money(raw: str):
+    """'$52.99' -> 52.99 ; boş və ya yanlış dəyər -> None"""
+    txt = str(raw or "").replace("$", "").replace(",", "").strip()
+    if not txt:
+        return None
+    try:
+        return float(txt)
+    except ValueError:
+        return None
 
 
 def _build_message(counts, attention, total, stale, missing_ebay_price) -> str:

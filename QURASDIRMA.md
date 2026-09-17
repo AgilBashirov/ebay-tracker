@@ -216,17 +216,15 @@ eBay listinginizdəki qalıq say nəzərə alınır ki, lazımsız bildiriş gə
 Sistem eBay listinqlərinizi özü tənzimləyə bilər. **Hər şey defolt BAĞLIDIR** —
 açmaq üçün həm ümumi açar, həm də hər sətir üçün icazə lazımdır.
 
-### İki qat icazə
+### Necə işə salınır
 
-1. **Ümumi açar** — GitHub Variables: `AUTO_QTY=1` və/və ya `AUTO_PRICE=1`
-2. **Sətir icazəsi** — sheet-in **P sütunu** ("Avto"):
+GitHub Variables: `AUTO_QTY=1` və `AUTO_PRICE=1`
 
-| P sütununa yazın | Nə olur |
-|---|---|
-| `beli` | həm say, həm qiymət avtomatik |
-| `say` | yalnız say |
-| `qiymet` | yalnız qiymət |
-| boş | heç nəyə toxunulmur |
+Bundan sonra **bütün məhsullar avtomatik idarə olunur**. Sheet-də icazə sütunu
+yoxdur — heç nə yazmaq lazım deyil. Sistemi dayandırmaq üçün eyni dəyişənləri
+`0` edirsiniz.
+
+`AUTO_DRY_RUN=1` olduqda sistem heç nəyi dəyişmir, yalnız nə edəcəyini yazır.
 
 Üstəlik `AUTO_DRY_RUN=1` (defolt) olduqda sistem **heç nəyi dəyişmir**, yalnız
 nə edəcəyini Telegram-a yazır. Bir neçə gün baxıb əmin olandan sonra `0` edin.
@@ -250,30 +248,58 @@ Stok bərpa olunanda say avtomatik 0-dan 3-ə qayıdır.
 
 ### Qiymət necə tənzimlənir
 
-Meyar faiz marjası deyil, **hər satışdan əlinizə keçən təmiz dollar**:
+Meyar faiz marjası deyil, **hər satışdan əlinizə keçən təmiz dollar**.
+Bu rəqəm **HƏDD-dir (minimum), hədəf deyil**:
 
-| Amazon qiyməti | Hədəf təmiz qazanc |
+| Amazon qiyməti | Minimum təmiz qazanc |
 |---|---|
 | $20-a qədər | $5 |
 | $20 – $50 | $7 |
 | $50-dən yuxarı | $10 |
 
-`PROFIT_TIERS` dəyişəni ilə dəyişdirilə bilər: `20:5,50:7,1000000:10`
+```
+qazanc həddən AZDIRSA   →  qiymət qaldırılır
+qazanc həddən ÇOXDURSA  →  toxunulmur ✅
+```
+
+**Niyə çox qazanc "düzəldilmir":** hədd dollarladır. Əgər sistem qazancı hədd
+səviyyəsinə "endirsəydi", $395-lıq məhsuldan $136 qazanan listinq $11-ə enərdi.
+Real mağazada ölçdük — 22 məhsulun qiyməti enirdi, ümumi qazanc **$508 → $294**
+düşürdü. İndi isə eyni mağazada 19 məhsulun qiyməti qalxır, qazanc **+$63** artır.
+
+Qazancınız həddən xeyli çoxdursa sistem sizə **sakit bildiriş** göndərir:
+"istəsəniz $X-ə endirib daha rəqabətli ola bilərsiniz". Qərar sizindir.
+Avtomatik endirmə istəyirsinizsə: `AUTO_PRICE_ALLOW_DOWN=1`
+
+`PROFIT_TIERS` dəyişəni ilə hədləri dəyişə bilərsiniz: `20:5,50:7,1000000:10`
 
 Qoruyucular:
 
-- Qazanc hədəfin ətrafındadırsa **toxunulmur** (hədəfdən $2-a qədər çox ola bilər)
-- Bir işləmədə qiymət maksimum **+50% / −25%** dəyişir
+- Bir işləmədə qiymət maksimum **+50%** qalxır
 - $0.50-dən kiçik fərqə görə dəyişiklik edilmir
-- **Heç vaxt zərərinə satış olmur** — hədəfə çatmaq üçün qiymət həddindən çox
-  qaldırılmalıdırsa dəyişiklik edilmir, Telegram-a xəbərdarlıq gedir
+- **Heç vaxt zərərinə satış olmur** — həddə çatmaq üçün qiymət təhlükəsizlik
+  həddindən çox qaldırılmalıdırsa dəyişiklik edilmir, Telegram-a xəbərdarlıq gedir
 
-### Q sütunu — audit izi
+### Telegram — bir işləmə, bir mesaj
 
-Bot nə etdiyini sheet-in **Q sütununa** yazır:
-`16.09 20:06 say 8 → 3, qiymət $60.99 → $67.99`
+Hər işləmədən sonra Telegram-a **yalnız bir qısa mesaj** gəlir:
 
-Beləliklə hər dəyişikliyi sonradan yoxlaya bilərsiniz.
+```
+eBay yoxlaması · 12/54 məhsul
+
+📈 Qiymət (2)
+• Granite Amino Acids — $52.99 ↑ $66.99 · qazanc $7.39
+• Country Farms Greens — $39.99 ↑ $49.99 · qazanc $7.55
+
+📦 Say (2)
+• Mifoci Toothbrushes — 8 → 3
+• Tart Cherry Powder — 0 → 3 (satışa qayıtdı)
+
+⚠️ Diqqət (1)
+• Micro Ingredients — qazanc $1.01, hədəf $7.00 tutmur
+```
+
+Dəyişiklik və diqqət tələb edən hal yoxdursa **heç bir mesaj gəlmir**.
 
 ---
 

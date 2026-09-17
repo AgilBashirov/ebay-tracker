@@ -81,15 +81,34 @@ def open_sheet():
 # ---------------------------------------------------------------------------
 
 def ensure_structure(ws):
-    """Başlıqları qoyur və bütün cədvəl görünüşünü tənzimləyir."""
+    """Başlıqları qoyur, artıq sütunları təmizləyir və görünüşü tənzimləyir."""
     current = with_retry(ws.row_values, 1, what="Başlıqların oxunması")
     if current[: len(config.HEADERS)] != config.HEADERS:
         ws.update(
             values=[config.HEADERS],
             range_name=f"A1:{_col_letter(len(config.HEADERS))}1",
         )
+
+    # Struktur dəyişəndə (məsələn "Avto" sütunları silinəndə) sağda qalan
+    # köhnə məlumatı təmizləyirik — əks halda sheet-də mənasız sütunlar qalır.
+    _clear_extra_columns(ws, len(current))
+
     apply_layout(ws)
     return True
+
+
+def _clear_extra_columns(ws, current_width: int) -> None:
+    need = len(config.HEADERS)
+    if current_width <= need:
+        return
+    first = _col_letter(need + 1)
+    last = _col_letter(current_width)
+    try:
+        with_retry(ws.batch_clear, [f"{first}:{last}"],
+                   what="Artıq sütunların təmizlənməsi")
+        print(f"[sheets] Artıq sütunlar təmizləndi: {first}:{last}")
+    except Exception as e:
+        print(f"[sheets] Artıq sütunlar təmizlənə bilmədi: {e}")
 
 
 def apply_layout(ws):
@@ -122,20 +141,27 @@ def apply_layout(ws):
         }
     })
 
-    # ---- Başlığı dondur ----
+    # ---- Başlığı və ilk 3 sütunu dondur ----
+    # Sağa sürüşdürəndə məhsul adı ekranda qalır — əks halda hansı sətrin
+    # hansı məhsul olduğunu itirirdiniz.
     reqs.append({
         "updateSheetProperties": {
             "properties": {"sheetId": sheet_id,
-                           "gridProperties": {"frozenRowCount": 1}},
-            "fields": "gridProperties.frozenRowCount",
+                           "gridProperties": {"frozenRowCount": 1,
+                                              "frozenColumnCount": 3}},
+            "fields": ("gridProperties.frozenRowCount,"
+                       "gridProperties.frozenColumnCount"),
         }
     })
 
     # ---- Sütun enləri ----
+    # Linklər qısa saxlanılır: uzun URL-lər cədvəlin yarısını yeyirdi və
+    # oxunmurdu. Xanaya klikləyib açmaq üçün bu en kifayətdir, məhsul adı
+    # və rəqəmlər isə ekranda görünür.
     widths = {
-        1: 145,   # A eBay Link
-        2: 145,   # B Amazon Link
-        3: 270,   # C Məhsul Adı
+        1: 58,    # A eBay Link
+        2: 58,    # B Amazon Link
+        3: 300,   # C Məhsul Adı
         4: 90,    # D eBay Qiymətim
         5: 70,    # E eBay Say
         6: 95,    # F Amazon (əvvəlki)
@@ -148,8 +174,6 @@ def apply_layout(ws):
         13: 115,  # M Son Yoxlama
         14: 115,  # N Növbəti Yoxlama
         15: 150,  # O Status
-        16: 70,   # P Avto
-        17: 230,  # Q Avto Əməliyyat
     }
     for col, px in widths.items():
         reqs.append({
@@ -158,6 +182,23 @@ def apply_layout(ws):
                           "startIndex": col - 1, "endIndex": col},
                 "properties": {"pixelSize": px},
                 "fields": "pixelSize",
+            }
+        })
+
+    # ---- Lazımsız sütunları gizlət ----
+    # SİLMİRİK, gizlədirik: kod sütunlara nömrə ilə müraciət edir, silinsə
+    # bütün nömrələr sürüşər və sistem sıradan çıxar. Gizli sütun isə
+    # məlumatını saxlayır, sadəcə görünmür.
+    #   I  eBay Haqqı       -> haqq modeli artıq Marja $ içindədir
+    #   K  Marja %          -> qərarlar dollarla verilir, faiz çaşdırırdı
+    #   N  Növbəti Yoxlama  -> sistemin öz daxili cədvəli
+    for col in (9, 11, 14):
+        reqs.append({
+            "updateDimensionProperties": {
+                "range": {"sheetId": sheet_id, "dimension": "COLUMNS",
+                          "startIndex": col - 1, "endIndex": col},
+                "properties": {"hiddenByUser": True},
+                "fields": "hiddenByUser",
             }
         })
 
@@ -192,8 +233,7 @@ def apply_layout(ws):
     align(6, 7, "RIGHT")     # F-G Amazon qiymətləri
     align(8, 8, "LEFT")      # H stok mətni
     align(9, 12, "RIGHT")    # I-L haqq, marja, təklif
-    align(13, 16, "CENTER")  # M-P tarixlər, status, avto
-    align(17, 17, "LEFT")    # Q bot nə etdi
+    align(13, 15, "CENTER")  # M-O tarixlər, status
 
     # ---- Status sütunu qalın ----
     reqs.append({
@@ -248,8 +288,6 @@ def read_rows(ws):
                 "last_check": padded[config.COL["last_check"] - 1].strip(),
                 "next_check": padded[config.COL["next_check"] - 1].strip(),
                 "prev_status": padded[config.COL["status"] - 1].strip(),
-                "auto": padded[config.COL["auto"] - 1].strip(),
-                "auto_log": padded[config.COL["auto_log"] - 1].strip(),
             }
         )
     return rows
@@ -458,15 +496,6 @@ def write_results(ws, results):
                 ],
             }
         )
-
-    # Q sütunu (bot əməliyyatı) ayrıca yazılır — aralarındakı P sütunu
-    # sizindir, ona heç vaxt toxunulmur.
-    for r in results:
-        if r.get("auto_log"):
-            updates.append({
-                "range": f"Q{r['row']}",
-                "values": [[r["auto_log"]]],
-            })
 
     with_retry(ws.batch_update, updates, value_input_option="USER_ENTERED",
                what="Sətirlərin yazılması")

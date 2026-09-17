@@ -10,6 +10,15 @@ import sys
 import types
 from datetime import datetime, timedelta
 
+# Windows konsolu defolt olaraq cp1252-dir və "İ", "ə" kimi hərfləri çap edə
+# bilmir — test hesabatı çökürdü. UTF-8-ə keçiririk.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        if (_stream.encoding or "").lower().replace("-", "") != "utf8":
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 sys.path[:0] = [os.path.dirname(os.path.abspath(__file__)),
                 os.path.join(os.path.dirname(os.path.abspath(__file__)), "src")]
 
@@ -18,7 +27,7 @@ os.environ.setdefault("SALES_TAX_PCT", "10")
 os.environ.setdefault("EBAY_FVF_PCT", "13.6")
 # ebayfeescalculator.com-da "Oversea sales? No" seçilib — yəni beynəlxalq haqq
 # modelə daxil deyil. Müqayisənin düz olması üçün burada da 0 qoyuruq.
-# Azərbaycan haqqı (1.30%) ayrıca test_automation.py-də yoxlanılır.
+# Azərbaycan haqqı (1.30%) ayrıca test_auto.py-də yoxlanılır.
 os.environ.setdefault("EBAY_INTERNATIONAL_PCT", "0")
 # Kalkulyator haqların üstünə gələn ƏDV-ni də modelləşdirmir.
 # Azərbaycan ƏDV-si (18%) ayrıca test_auto.py-də yoxlanılır.
@@ -96,8 +105,8 @@ for v, exp in [(32.99, 32.99), (32.30, 32.99), (33.00, 33.99),
 # ===========================================================================
 section("4. TÖVSİYƏ OLUNAN QİYMƏT")
 # ===========================================================================
-# Təklif DOLLAR hədəfi ilə hesablanır (config.PROFIT_TIERS) və yalnız
-# həqiqətən lazım olanda verilir — qazanc məqbul zonadadırsa boş qalır.
+# Təklif DOLLAR HƏDDİ ilə hesablanır (config.PROFIT_TIERS).
+# Hədd minimumdur, tavan deyil — qazanc həddən çoxdursa təklif boş qalır.
 
 def _tovsiye_yoxla(ad, ebay, amazon, gozlenen_var):
     sug = pricing.suggest_ebay_price(ebay, None, amazon)
@@ -124,9 +133,17 @@ _hedef = pricing.target_profit_for(39.95)
 _yaxsi = round(pricing.price_for_profit(_hedef + 1.0, 39.95), 2)
 _tovsiye_yoxla("qazanc qaydasındadır", _yaxsi, 39.95, False)
 
-# 4) Qiymət həddindən çox yuxarıdır → aşağı salmaq təklif olunur
-_s4 = _tovsiye_yoxla("həddindən baha", 120.00, 39.95, True)
-check("   baha olanda təklif aşağı salır", _s4 < 120.00, True)
+# 4) Qazanc həddən ÇOXDUR → təklif YOXDUR.
+#    Hədd minimumdur, tavan deyil: çox qazanan məhsula toxunulmur.
+_tovsiye_yoxla("qazanc həddən çoxdur", 120.00, 39.95, False)
+
+# 5) Ucuzlaşdırma açıq olsa təklif verilir
+os.environ["AUTO_PRICE_ALLOW_DOWN"] = "1"
+importlib.reload(config); importlib.reload(pricing)
+_s5 = _tovsiye_yoxla("ucuzlaşdırma açıqdır", 120.00, 39.95, True)
+check("   açıq olanda təklif aşağı salır", _s5 < 120.00, True)
+os.environ["AUTO_PRICE_ALLOW_DOWN"] = "0"
+importlib.reload(config); importlib.reload(pricing)
 
 # ===========================================================================
 section("5. AMAZON SƏHİFƏSİNİN OXUNMASI")
@@ -318,7 +335,9 @@ fs.write_results = lambda w, res: [W.__setitem__(x["row"], x) for x in res]
 sys.modules["sheets"] = fs
 
 fn = types.ModuleType("notify")
-for n in ["format_alerts", "format_blocked", "format_health"]:
+for n in ["format_run_summary", "format_alerts", "format_blocked",
+          "format_health", "format_auto_actions", "format_low_profit",
+          "format_could_lower", "format_run_error"]:
     setattr(fn, n, getattr(notify, n))
 fn.send = lambda t, silent=False: SENT.append(t) or True
 sys.modules["notify"] = fn
@@ -343,7 +362,7 @@ sys.modules["config"] = config
 spec = importlib.util.spec_from_file_location("main_test", "src/main.py")
 main = importlib.util.module_from_spec(spec)
 _stdout = sys.stdout
-sys.stdout = open(os.devnull, "w")
+sys.stdout = open(os.devnull, "w", encoding="utf-8")
 try:
     spec.loader.exec_module(main)
     main.run()
@@ -362,12 +381,10 @@ check("sətir 6 (sabit) → OK", st.get(6), "OK")
 check("sətir 7 (qazanc $5-dən az) → AZ QAZANC", st.get(7), "AZ QAZANC")
 
 msg = SENT[0] if SENT else ""
-check("Telegram-a 1 toplu mesaj", len(SENT), 1)
-check("mesajda 3 məhsul var", "3 məhsul" in msg, True)
-check("qiymət bahalaşması var", "BAHALAŞDI" in msg, True)
-check("say azlığı var", "SAY SİZDƏKİNDƏN AZDIR" in msg, True)
-check("stok bitməsi var", "STOK BİTİB" in msg, True)
-check("marja bildirişi YOXDUR", "MARJA AZDIR" not in msg, True)
+check("Telegram-a YALNIZ 1 mesaj", len(SENT), 1)
+check("mesaj qısadır (< 900 simvol)", len(msg) < 900, True)
+check("diqqət bölməsi var", "Diqqət" in msg, True)
+check("nə qədər məhsul yoxlandığı yazılıb", "/" in msg.split("\n")[0], True)
 check("eBay bağlı məhsul mesajda yoxdur", "bağlı" not in msg.lower(), True)
 check("bütün sətirlərdə növbəti yoxlama var",
       all(v.get("next_check") for v in W.values()), True)

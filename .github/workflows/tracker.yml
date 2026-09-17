@@ -75,7 +75,7 @@ jobs:
           AUTO_PRICE: ${{ vars.AUTO_PRICE || secrets.AUTO_PRICE || '0' }}
           PROFIT_TIERS: ${{ vars.PROFIT_TIERS || secrets.PROFIT_TIERS || '20:5,50:7,1000000:10' }}
           MIN_PROFIT_USD: ${{ vars.MIN_PROFIT_USD || secrets.MIN_PROFIT_USD || '5' }}
-          AUTO_PRICE_ALLOW_DOWN: ${{ vars.AUTO_PRICE_ALLOW_DOWN || secrets.AUTO_PRICE_ALLOW_DOWN || '1' }}
+          AUTO_PRICE_ALLOW_DOWN: ${{ vars.AUTO_PRICE_ALLOW_DOWN || secrets.AUTO_PRICE_ALLOW_DOWN || '0' }}
           AUTO_PRICE_DOWN_TOLERANCE: ${{ vars.AUTO_PRICE_DOWN_TOLERANCE || secrets.AUTO_PRICE_DOWN_TOLERANCE || '2.00' }}
           AUTO_PRICE_UP_TOLERANCE: ${{ vars.AUTO_PRICE_UP_TOLERANCE || secrets.AUTO_PRICE_UP_TOLERANCE || '0.25' }}
           AUTO_PRICE_MAX_UP_PCT: ${{ vars.AUTO_PRICE_MAX_UP_PCT || secrets.AUTO_PRICE_MAX_UP_PCT || '50' }}
@@ -127,5 +127,16 @@ jobs:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           SHEET_ID: ${{ secrets.SHEET_ID }}
+          # Hesabat da qazanc hesablayır — haqq dərəcələri eyni olmalıdır,
+          # əks halda "ucuzlaşdıra bilərsiniz" siyahısı yanlış çıxar.
+          EBAY_FVF_PCT: ${{ vars.EBAY_FVF_PCT || secrets.EBAY_FVF_PCT || '13.6' }}
+          EBAY_AD_RATE_PCT: ${{ vars.EBAY_AD_RATE_PCT || secrets.EBAY_AD_RATE_PCT || '0' }}
+          SALES_TAX_PCT: ${{ vars.SALES_TAX_PCT || secrets.SALES_TAX_PCT || '10' }}
+          EBAY_INTERNATIONAL_PCT: ${{ vars.EBAY_INTERNATIONAL_PCT || secrets.EBAY_INTERNATIONAL_PCT || '1.30' }}
+          EBAY_FX_PCT: ${{ vars.EBAY_FX_PCT || secrets.EBAY_FX_PCT || '0' }}
+          EBAY_FEE_VAT_PCT: ${{ vars.EBAY_FEE_VAT_PCT || secrets.EBAY_FEE_VAT_PCT || '18' }}
+          PROFIT_TIERS: ${{ vars.PROFIT_TIERS || secrets.PROFIT_TIERS || '20:5,50:7,1000000:10' }}
+          MIN_PROFIT_USD: ${{ vars.MIN_PROFIT_USD || secrets.MIN_PROFIT_USD || '5' }}
+          AUTO_PRICE_ALLOW_DOWN: ${{ vars.AUTO_PRICE_ALLOW_DOWN || secrets.AUTO_PRICE_ALLOW_DOWN || '0' }}
           PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/src
         run: python src/report.py

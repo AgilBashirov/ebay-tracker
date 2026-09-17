@@ -10,10 +10,18 @@ Hər işləmədə:
   6. Yalnız dəyişiklik varsa Telegram-a bildiriş göndərir
   7. Bloklama olarsa dayanır + xəbərdarlıq göndərir; qalanlar növbəti işləməyə qalır
 """
-import argparse
 import sys
 import traceback
 from datetime import datetime, timedelta
+
+# Windows-da konsol cp1252-dir və Azərbaycan hərflərini çap edə bilmir.
+# GitHub Actions-da UTF-8-dir, amma öz kompüterinizdə işlətsəniz çökərdi.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        if (_stream.encoding or "").lower().replace("-", "") != "utf8":
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 import config
 import ebay_api
@@ -41,7 +49,7 @@ class _NoBrowser:
         raise RuntimeError("Birbaşa brauzer rejimi aktiv deyil (API rejimindəyik)")
 
 
-def run(health_report: bool = False) -> int:
+def run() -> int:
     print("=" * 60)
     print("eBay Dropshipping — qiymət/stok yoxlaması")
     print("=" * 60)
@@ -81,6 +89,7 @@ def run(health_report: bool = False) -> int:
     ebay_fetches = 0
     auto_actions = []
     low_profit = []
+    could_lower = []
 
     # API rejimi: birbaşa Amazon-a dəymirik.
     # "api" seçilibsə əvvəldən, "auto"da isə ilk bloklamadan sonra aktivləşir.
@@ -267,22 +276,21 @@ def run(health_report: bool = False) -> int:
                 stats["changed"] += 1
 
             # --- AVTOMATİK İDARƏETMƏ (say + qiymət) ---
-            modes = config.auto_modes(row.get("auto"))
-            if modes and ebay_write.is_configured():
+            # Bütün məhsullara tətbiq olunur — sheet-də icazə sütunu yoxdur.
+            if ebay_write.is_configured():
                 item_id = ebay_api.extract_item_id(row["ebay_link"])
 
                 # 1) Say planı
                 want_qty = None
-                if "qty" in modes:
-                    if config.AUTO_QTY:
-                        want_qty = pricing.desired_qty(data.in_stock, data.qty)
-                    elif config.AUTO_ZERO_QTY and not data.in_stock:
-                        want_qty = 0   # köhnə rejim: yalnız sıfırlama
+                if config.AUTO_QTY:
+                    want_qty = pricing.desired_qty(data.in_stock, data.qty)
+                elif config.AUTO_ZERO_QTY and not data.in_stock:
+                    want_qty = 0   # köhnə rejim: yalnız sıfırlama
 
                 # 2) Qiymət planı
                 plan = None
                 want_price = None
-                if "price" in modes and config.AUTO_PRICE:
+                if config.AUTO_PRICE:
                     if not ebay_price_fresh:
                         # Sheet-dəki qiymət köhnəlmiş ola bilər — əlinizlə
                         # dəyişdiyiniz qiyməti səhvən geri qaytarmayaq.
@@ -322,13 +330,10 @@ def run(health_report: bool = False) -> int:
                         record["reason"] = reason
                         record["next_check"] = _next_check(
                             row, status, price_changed)
-                        record["auto_log"] = f"{_stamp()} {res['message']}"
                     elif res["skipped"] and res["skipped"] not in NOISE_SKIPS:
                         print(f"    ⏭  Toxunulmadı: {res['skipped']}")
-                        record["auto_log"] = f"{_stamp()} ⏭ {res['skipped']}"
                     elif res["message"]:
                         print(f"    🧪 {res['message']}")
-                        record["auto_log"] = f"{_stamp()} {res['message']}"
 
                     # Hesabata YALNIZ real hadisə düşür:
                     #   • dəyişiklik edildi
@@ -342,6 +347,19 @@ def run(health_report: bool = False) -> int:
                             "name": record["product_name"], "item_id": item_id,
                             "plan": plan, **res,
                         })
+
+                # Qazanc həddən xeyli çoxdursa — məcburiyyət yoxdur, amma
+                # istəsəniz ucuzlaşdırıb rəqabəti artıra bilərsiniz.
+                if plan and plan.get("could_lower") and not plan.get("new_price"):
+                    could_lower.append({
+                        "name": record["product_name"],
+                        "current_price": ebay_price,
+                        "current_profit": plan.get("current_profit"),
+                        "suggested": plan["could_lower"],
+                        "floor": plan.get("target_profit"),
+                        "amazon_price": amazon_new,
+                        "ebay_link": row["ebay_link"],
+                    })
 
                 # Hədəf qazanca çatılmırsa xəbər verək
                 # (qiymət dəyişsə də, dəyişməsə də)
@@ -365,9 +383,6 @@ def run(health_report: bool = False) -> int:
                         **record,
                         "ebay_link": row["ebay_link"],
                         "amazon_link": row["amazon_link"],
-                        # Qiymət avtomatik tətbiq olunubsa təklifi təkrarlamırıq
-                        "auto_applied": bool(record.get("auto_log")
-                                             and "qiymət" in record.get("auto_log", "")),
                     }
                 )
 
@@ -378,33 +393,31 @@ def run(health_report: bool = False) -> int:
     print(f"\nSheet yenilənir ({len(results)} sətir)...")
     sheets.write_results(ws, results)
 
-    # --- Bildirişlər ---
-    if alerts:
-        print(f"Telegram-a {len(alerts)} bildiriş göndərilir...")
-        notify.send(notify.format_alerts(alerts))
-
-    if auto_actions:
-        notify.send(notify.format_auto_actions(auto_actions, config.AUTO_DRY_RUN))
-
-    if low_profit:
-        notify.send(notify.format_low_profit(low_profit))
+    # --- TƏK BİLDİRİŞ ---
+    # Əvvəllər bir işləmədə 4-5 ayrı mesaj gedirdi. İndi hamısı bir qısa
+    # xülasədə birləşir; dəyişiklik və diqqət tələb edən hal yoxdursa
+    # ümumiyyətlə mesaj göndərilmir.
+    lost = sum(1 for r in results if r.get("status") == "BLOKLANDI")
+    summary = notify.format_run_summary(
+        checked=len(results),
+        total=stats["total"],
+        actions=auto_actions,
+        alerts=alerts,
+        low_profit=low_profit,
+        dry_run=config.AUTO_DRY_RUN,
+        blocked=lost,
+        block_reason=block_reason if lost else None,
+    )
+    if summary:
+        notify.send(summary)
     else:
         print("Dəyişiklik yoxdur — Telegram bildirişi göndərilmir.")
 
-    if block_reason:
-        remaining = len(batch) - processed
-        lost = sum(1 for r in results if r.get("status") == "BLOKLANDI")
-        if lost > 0:
-            # Yalnız məhsul həqiqətən oxuna bilməyəndə bildiriş göndəririk.
-            notify.send(notify.format_blocked(processed, remaining, block_reason, lost))
-        else:
-            # Ehtiyat kanal hər şeyi əhatə edib — bu, gündəlik normal haldır,
-            # Telegram-ı doldurmağa dəyməz. Yalnız loga yazılır.
-            print("ℹ️  Amazon birbaşa girişi bloklandı, API kanalı ilə tamamlandı "
-                  "(itki yoxdur — bildiriş göndərilmir).")
-
-    if health_report:
-        notify.send(notify.format_health(stats), silent=True)
+    if could_lower:
+        # Bu siyahı gündəlik hesabatda gedir (src/report.py) — hər işləmədə
+        # təkrarlamaq spam olardı.
+        print(f"💡 {len(could_lower)} məhsul ucuzlaşdırıla bilər "
+              f"(gündəlik hesabatda göstəriləcək)")
 
     print("\n" + "=" * 60)
     print(f"Bitdi. {stats}")
@@ -436,12 +449,7 @@ def _base(row):
         "margin_pct": None,
         "suggested_ebay": None,
         "ebay_fee": None,
-        "auto": row.get("auto", ""),
     }
-
-
-def _stamp() -> str:
-    return datetime.utcnow().strftime("%d.%m %H:%M")
 
 
 def _m(v):
@@ -449,16 +457,8 @@ def _m(v):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--health-report",
-        action="store_true",
-        help="İşləmənin sonunda günlük sağlamlıq hesabatı göndər",
-    )
-    args = parser.parse_args()
-
     try:
-        sys.exit(run(health_report=args.health_report))
+        sys.exit(run())
     except Exception as exc:
         traceback.print_exc()
         try:

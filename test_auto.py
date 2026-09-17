@@ -7,12 +7,21 @@ Bütün cavablar saxtadır, bütün yazma əməliyyatları tutulur.
 
 İşə salmaq:  PYTHONPATH=.:src python3 test_auto.py
 """
+import contextlib
 import importlib
 import importlib.util
 import os
 import sys
 import types
 from datetime import datetime, timedelta
+
+# Windows konsolu (cp1252) Azərbaycan hərflərini çap edə bilmir — UTF-8-ə keçirik.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        if (_stream.encoding or "").lower().replace("-", "") != "utf8":
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [ROOT, os.path.join(ROOT, "src")]
@@ -28,6 +37,9 @@ os.environ.update({
     "EBAY_FEE_VAT_PCT": "18",
     # Avtomatika tam açıq
     "AUTO_ZERO_QTY": "1", "AUTO_QTY": "1", "AUTO_PRICE": "1",
+    # Ucuzlaşdırma defolt BAĞLIDIR; aşağı istiqaməti ayrıca sınamaq üçün
+    # bu testdə açırıq. Defolt davranış 4j bölməsində yoxlanılır.
+    "AUTO_PRICE_ALLOW_DOWN": "1",
 })
 
 PASS, FAIL = [], []
@@ -49,6 +61,25 @@ def near(name, got, expected, tol=0.02):
 
 def section(t):
     print(f"\n{'=' * 74}\n{t}\n{'=' * 74}")
+
+
+@contextlib.contextmanager
+def quiet():
+    """main.run()-un çıxışını udur.
+
+    encoding="utf-8" VACİBDİR: Windows-da open() defolt cp1252 verir və
+    Azərbaycan hərfləri (ə, İ, ş) çap edilə bilmir. src/main.py sys.stdout-u
+    yalnız import anında UTF-8-ə keçirir, ona görə ondan sonrakı hər yeni
+    yönləndirmə özü UTF-8 olmalıdır — əks halda main.run()-un ikinci
+    çağırışı UnicodeEncodeError ilə çökürdü.
+    """
+    prev = sys.stdout
+    sys.stdout = open(os.devnull, "w", encoding="utf-8")
+    try:
+        yield
+    finally:
+        sys.stdout.close()
+        sys.stdout = prev
 
 
 import config
@@ -198,26 +229,39 @@ print("\n  h) Məlumat çatmırsa")
 check("Amazon qiyməti yoxdur", pricing.plan_price_change(60.99, None)["new_price"], None)
 check("eBay qiyməti yoxdur", pricing.plan_price_change(None, 39.99)["new_price"], None)
 
-print("\n  i) Azalma bağlananda")
+print("\n  i) Azalma bağlananda (DEFOLT davranış)")
 os.environ["AUTO_PRICE_ALLOW_DOWN"] = "0"
 importlib.reload(config); importlib.reload(pricing)
-check("azalma bağlıdır → toxunulmur",
-      pricing.plan_price_change(60.99, 25.00)["new_price"], None)
+pi = pricing.plan_price_change(60.99, 25.00)
+check("azalma bağlıdır → qiymətə toxunulmur", pi["new_price"], None)
+check("əvəzində 'ucuzlaşdıra bilərsiniz' qeyd olunur",
+      bool(pi["could_lower"]), True)
+print(f"     məsləhət: $60.99 → ${pi['could_lower']} (məcburi deyil)")
 check("artım yenə işləyir",
       pricing.plan_price_change(60.99, 45.99)["direction"], "up")
+
+print("\n  j) HƏDD MƏNTİQİ — çox qazanc problem deyil")
+# Real mağazadan nümunə: $700 satış, $395 Amazon → $136 qazanc.
+# Hədd $10-dur, amma qazanc çox olduğu üçün TOXUNULMAMALIDIR.
+pj = pricing.plan_price_change(700.00, 395.00)
+cj, _ = pricing.margin(700.00, 395.00)
+print(f"     eBay $700 · Amazon $395 · qazanc ${cj} · hədd ${pj['target_profit']}")
+check("bahalı məhsulun qazancı kəsilmir", pj["new_price"], None)
+check("səbəb izah olunur", "həddən çoxdur" in pj["reason"], True)
 os.environ["AUTO_PRICE_ALLOW_DOWN"] = "1"
 importlib.reload(config); importlib.reload(pricing)
 
 # ===========================================================================
-section("5. SƏTİR ÜZRƏ İCAZƏ (P sütunu)")
+section("5. SHEET STRUKTURU — icazə sütunu artıq YOXDUR")
 # ===========================================================================
-for val, gozlenen in [("beli", {"qty", "price"}), ("hə", {"qty", "price"}),
-                      ("1", {"qty", "price"}), ("say", {"qty"}),
-                      ("sayı", {"qty"}), ("qiymet", {"price"}),
-                      ("qiymət", {"price"}), ("", set()), ("yox", set()),
-                      ("  BELI  ", {"qty", "price"})]:
-    check(f"'{val}' → {sorted(gozlenen) or 'icazə yoxdur'}",
-          config.auto_modes(val), gozlenen)
+check("sütun sayı 15-dir", len(config.HEADERS), 15)
+check("başlıqlar sütun xəritəsi ilə uyğundur",
+      max(config.COL.values()), len(config.HEADERS))
+check("'Avto' sütunu yoxdur", "auto" in config.COL, False)
+check("'Avto Əməliyyat' sütunu yoxdur", "auto_log" in config.COL, False)
+check("sonuncu sütun Status-dur", config.HEADERS[-1], "Status")
+check("icazə funksiyası silinib", hasattr(config, "auto_modes"), False)
+print(f"     Sütunlar: {' · '.join(config.HEADERS)}")
 
 # ===========================================================================
 section("6. YAZMA QORUYUCULARI — heç bir sorğu getməməli hallar")
@@ -292,13 +336,13 @@ import sheets
 now = datetime.utcnow()
 
 
-def mkrow(r, key, auto, qty, price):
+def mkrow(r, key, qty, price):
     return {"row": r, "ebay_link": f"https://www.ebay.com/itm/1570000000{r:02d}",
             "amazon_link": f"https://www.amazon.com/dp/{key}", "product_name": key,
             "ebay_price": price, "ebay_qty": qty, "amazon_old": 39.99, "stock_old": "",
             "last_check": (now - timedelta(days=2)).strftime("%Y-%m-%d %H:%M"),
             "next_check": (now - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M"),
-            "prev_status": "OK", "auto": auto, "auto_log": ""}
+            "prev_status": "OK"}
 
 
 def page(title, price=None, oos=False, only=None):
@@ -310,21 +354,18 @@ def page(title, price=None, oos=False, only=None):
     return h + f'<div id="availability" class="a"><span>{txt}</span></div>'
 
 
+# Sheet-də icazə sütunu yoxdur — BÜTÜN məhsullar avtomatikdir.
 FAKE = [
-    mkrow(2, "A_STOK_YOX",    "beli",   8,  60.99),   # stok bitib → say 0
-    mkrow(3, "B_ICAZESIZ",    "",       8,  60.99),   # icazə yox → toxunulmur
-    mkrow(4, "C_BOL_BAHA",    "beli",   8,  60.99),   # bol + bahalaşıb → say 3 + qiymət↑
-    mkrow(5, "D_AZ_QALIB",    "beli",   8,  60.99),   # Amazon-da 4 ədəd → say 1
-    mkrow(6, "E_YALNIZ_SAY",  "say",    8,  60.99),   # yalnız say rejimi
-    mkrow(7, "F_YALNIZ_QIY",  "qiymet", 8,  60.99),   # yalnız qiymət rejimi
+    mkrow(2, "A_STOK_YOX",   8,  60.99),   # stok bitib      → say 0
+    mkrow(4, "C_BOL_BAHA",   8,  60.99),   # bol + bahalaşıb → say 3 + qiymət↑
+    mkrow(5, "D_AZ_QALIB",   8,  60.99),   # Amazon-da 4 ədəd → say 1
+    mkrow(6, "E_QAYIDIB",    0,  60.99),   # satışa qayıdır   → say 0 → 3
 ]
 PAGES = {
-    "A_STOK_YOX":   page("Stoku bitib", oos=True),
-    "B_ICAZESIZ":   page("İcazəsiz məhsul", oos=True),
-    "C_BOL_BAHA":   page("Bol və bahalaşıb", price=45.99),
-    "D_AZ_QALIB":   page("Az qalıb", price=39.99, only=4),
-    "E_YALNIZ_SAY": page("Yalnız say", price=45.99),
-    "F_YALNIZ_QIY": page("Yalnız qiymət", price=45.99),
+    "A_STOK_YOX":  page("Stoku bitib", oos=True),
+    "C_BOL_BAHA":  page("Bol və bahalaşıb", price=45.99),
+    "D_AZ_QALIB":  page("Az qalıb", price=39.99, only=4),
+    "E_QAYIDIB":   page("Satışa qayıdır", price=45.99),
 }
 
 WRITTEN, MESSAGES = {}, []
@@ -339,8 +380,9 @@ fs.write_results = lambda w, res: [WRITTEN.__setitem__(x["row"], x) for x in res
 sys.modules["sheets"] = fs
 
 fn = types.ModuleType("notify")
-for n in ["format_alerts", "format_blocked", "format_health",
-          "format_auto_actions", "format_low_profit", "format_run_error"]:
+for n in ["format_run_summary", "format_alerts", "format_blocked",
+          "format_health", "format_auto_actions", "format_low_profit",
+          "format_could_lower", "format_run_error"]:
     setattr(fn, n, getattr(notify, n))
 fn.send = lambda t, silent=False: MESSAGES.append(t) or True
 sys.modules["notify"] = fn
@@ -380,63 +422,46 @@ sys.modules["ebay_write"] = ebay_write
 
 spec = importlib.util.spec_from_file_location("main_auto", os.path.join(ROOT, "src/main.py"))
 main = importlib.util.module_from_spec(spec)
-_out = sys.stdout
-sys.stdout = open(os.devnull, "w")
-try:
+with quiet():
     spec.loader.exec_module(main)
     main.run()
-finally:
-    sys.stdout.close()
-    sys.stdout = _out
 
 
 def acted(suffix):
     return next((c for c in CALLS if c["item"].endswith(suffix)), None)
 
 
-a, b = acted("02"), acted("03")
-c, dd = acted("04"), acted("05")
-e, f = acted("06"), acted("07")
+a, c, dd, e = acted("02"), acted("04"), acted("05"), acted("06")
 
-print("  Sətir 2 — Amazon-da stok bitib (icazə: beli)")
+check("hər 4 məhsula toxunuldu (icazə soruşulmadı)", len(CALLS), 4)
+
+print("  Sətir 2 — Amazon-da stok bitib")
 check("   say 0 edildi", a and a["new_qty"], 0)
 check("   qiymətə toxunulmadı", a and a["new_price"], None)
 
-print("  Sətir 3 — icazə YOXDUR")
-check("   heç nə edilmədi", b, None)
-
-print("  Sətir 4 — bol stok + Amazon bahalaşıb (icazə: beli)")
+print("  Sətir 4 — bol stok + Amazon bahalaşıb")
 check("   say 8 → 3", c and c["new_qty"], 3)
 check("   qiymət qaldırıldı", bool(c and c["new_price"] and c["new_price"] > 60.99), True)
 
 print("  Sətir 5 — Amazon-da yalnız 4 ədəd qalıb")
 check("   say 8 → 1", dd and dd["new_qty"], 1)
 
-print("  Sətir 6 — icazə: 'say' (yalnız say)")
-check("   say dəyişdi", e and e["new_qty"], 3)
-check("   qiymətə toxunulmadı", e and e["new_price"], None)
-
-print("  Sətir 7 — icazə: 'qiymet' (yalnız qiymət)")
-check("   saya toxunulmadı", f and f["new_qty"], None)
-check("   qiymət dəyişdi", bool(f and f["new_price"]), True)
+print("  Sətir 6 — satışa qayıdır")
+check("   say 0 → 3", e and e["new_qty"], 3)
 
 print("\n  Sheet-ə yazılanlar:")
 for rownum in sorted(WRITTEN):
     w = WRITTEN[rownum]
     print(f"    sətir {rownum}: {w['product_name'][:14]:14} "
           f"say={w.get('ebay_qty')} qiymət={w.get('ebay_price')} "
-          f"| {w.get('auto_log', '')}")
-check("audit izi yazıldı (Q sütunu)",
-      bool(WRITTEN.get(4, {}).get("auto_log")), True)
-check("icazəsiz sətirdə audit izi yoxdur",
-      bool(WRITTEN.get(3, {}).get("auto_log")), False)
+          f"status={w.get('status')}")
 
 # ===========================================================================
 section("8A. SPAM YOXLAMASI — heç nə dəyişməyəndə hesabat getməməlidir")
 # ===========================================================================
 # Bütün sətirlər onsuz da hədəf vəziyyətdədir: say 3, qiymət hədəfə uyğun.
 hedef_qiymet = pricing._round_price(pricing.price_for_profit(7.0, 39.99))
-SAKIT = [mkrow(10 + i, f"SABIT_{i}", "beli", 3, hedef_qiymet) for i in range(4)]
+SAKIT = [mkrow(10 + i, f"SABIT_{i}", 3, hedef_qiymet) for i in range(4)]
 for i in range(4):
     PAGES[f"SABIT_{i}"] = page(f"Sabit məhsul {i}", price=39.99)
 for i in range(4):
@@ -445,19 +470,13 @@ for i in range(4):
 
 FAKE[:] = SAKIT
 WRITTEN.clear(); MESSAGES.clear(); CALLS.clear()
-_out = sys.stdout
-sys.stdout = open(os.devnull, "w")
-try:
+with quiet():
     main.run()
-finally:
-    sys.stdout.close()
-    sys.stdout = _out
 
-spam = [m for m in MESSAGES if "avtomatik dəyişiklik" in m.lower() or "QURU REJİM" in m]
-check("dəyişiklik yoxdursa avto-hesabat GÖNDƏRİLMİR", len(spam), 0)
+check("dəyişiklik yoxdursa HEÇ BİR mesaj getmir", len(MESSAGES), 0)
 check("eBay-ə yazma sorğusu getmir",
       all(not c["done"] for c in CALLS), True)
-print(f"     ({len(CALLS)} sətir yoxlandı, {len(MESSAGES)} mesaj göndərildi)")
+print(f"     (4 sətir yoxlandı, {len(MESSAGES)} mesaj göndərildi)")
 
 # ===========================================================================
 section("8B. HƏDD YUVARLAQLAŞDIRMASI — hədd aşılmamalıdır")
@@ -482,38 +501,29 @@ for cur, amz in [(60.99, 10.00), (100.00, 20.00)]:
 # ===========================================================================
 section("8C. KÖHNƏ QİYMƏTLƏ AVTOMATİK DƏYİŞİKLİK EDİLMİR")
 # ===========================================================================
-FAKE[:] = [mkrow(20, "KOHNE_QIYMET", "qiymet", 3, 60.99)]
+FAKE[:] = [mkrow(20, "KOHNE_QIYMET", 3, 60.99)]
 PAGES["KOHNE_QIYMET"] = page("Köhnə qiymət", price=45.99)
 ebay_api.is_configured = lambda: False          # API söndürülüb
 scraper.scrape_ebay_info = lambda b, u, api_mode=False: {"price": None, "qty": None}
 WRITTEN.clear(); MESSAGES.clear(); CALLS.clear()
-_out = sys.stdout
-sys.stdout = open(os.devnull, "w")
-try:
+with quiet():
     main.run()
-finally:
-    sys.stdout.close()
-    sys.stdout = _out
-check("eBay qiyməti oxunmayıbsa qiymətə toxunulmur", len(CALLS), 0)
+check("eBay qiyməti oxunmayıbsa qiymətə toxunulmur",
+      all(c["new_price"] is None for c in CALLS), True)
 ebay_api.is_configured = lambda: True
 
 # ===========================================================================
 section("8D. DÜZƏLİŞDƏN SONRA STATUS YENİLƏNİR")
 # ===========================================================================
-FAKE[:] = [mkrow(30, "AZ_QAZANC", "beli", 3, 60.99)]
+FAKE[:] = [mkrow(30, "AZ_QAZANC", 3, 60.99)]
 PAGES["AZ_QAZANC"] = page("Az qazanclı məhsul", price=52.99)
 EBAY_LIVE["30"] = {"price": 60.99, "qty": 3, "qty_exact": True, "status": "IN_STOCK"}
 os.environ["AUTO_DRY_RUN"] = "0"
 importlib.reload(config)
 main.config = config
 WRITTEN.clear(); MESSAGES.clear(); CALLS.clear()
-_out = sys.stdout
-sys.stdout = open(os.devnull, "w")
-try:
+with quiet():
     main.run()
-finally:
-    sys.stdout.close()
-    sys.stdout = _out
 w30 = WRITTEN.get(30, {})
 cur30, _ = pricing.margin(60.99, 52.99)
 print(f"     Əvvəl: qiymət $60.99 · Amazon $52.99 · qazanc ${cur30}")
@@ -584,13 +594,29 @@ for _d2 in range(1, 8):
 check(f"   ucuzlaşma da sabitləşdi: {_d2} dövr (${_q2})", _d2 <= 4, True)
 
 # ===========================================================================
-section("8. TELEGRAM MESAJI")
+section("9. TELEGRAM — bir işləmə, BİR mesaj")
 # ===========================================================================
-auto_msg = next((m for m in MESSAGES if "avtomatik dəyişiklik" in m.lower()
-                 or "QURU REJİM" in m), "")
-check("hesabat göndərildi", bool(auto_msg), True)
+# Real vəziyyət: 4 məhsul, müxtəlif dəyişikliklər. Yalnız bir mesaj getməlidir.
+FAKE[:] = [
+    mkrow(2, "A_STOK_YOX", 8, 60.99),
+    mkrow(4, "C_BOL_BAHA", 8, 60.99),
+    mkrow(5, "D_AZ_QALIB", 8, 60.99),
+    mkrow(6, "E_QAYIDIB",  0, 60.99),
+]
+for k in ("2", "4", "5", "6"):
+    EBAY_LIVE[f"0{k}"] = {"price": 60.99, "qty": 0 if k == "6" else 8,
+                          "qty_exact": True, "status": "IN_STOCK"}
+WRITTEN.clear(); MESSAGES.clear(); CALLS.clear()
+with quiet():
+    main.run()
+
+check("YALNIZ BİR mesaj göndərildi", len(MESSAGES), 1)
+msg = MESSAGES[0] if MESSAGES else ""
+check("mesaj qısadır (< 900 simvol)", len(msg) < 900, True)
+check("qiymət bölməsi var", "📈 Qiymət" in msg, True)
+check("say bölməsi var", "📦 Say" in msg, True)
 print()
-for line in auto_msg.replace("<b>", "").replace("</b>", "").replace(
+for line in msg.replace("<b>", "").replace("</b>", "").replace(
         "<i>", "").replace("</i>", "").split("\n"):
     print("  " + line)
 

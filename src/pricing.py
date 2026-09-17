@@ -176,12 +176,12 @@ def suggest_ebay_price(
     amazon_new: float | None,
 ) -> float | None:
     """
-    Tövsiyə olunan yeni eBay qiyməti — avtomatikanın tətbiq edəcəyi qiymətlə
-    EYNİDİR, yəni sheet-dəki "Tövsiyə" sütunu botun etdiyi işi əks etdirir.
+    Tövsiyə olunan yeni eBay qiyməti — avtomatikanın edəcəyi işlə EYNİDİR,
+    yəni sheet-dəki "Tövsiyə" sütunu botun davranışını əks etdirir.
 
-    Əsas meyar: hər satışdan hədəflənən TƏMİZ QAZANC ($) — pilləlidir
-    (bax config.PROFIT_TIERS). Faiz marjası deyil, çünki dropshipping-də
-    əhəmiyyətli olan satışdan əlinizə keçən dollar məbləğidir.
+    Meyar: hər satışdan MİNİMUM təmiz qazanc ($) — pillələr config.PROFIT_TIERS.
+    Bu HƏDD-dir: qazanc həddən çoxdursa təklif verilmir (boş qalır), çünki
+    çox qazanc düzəldiləsi problem deyil.
 
     TARGET_MARGIN_PCT təyin edilibsə (defolt 0 = bağlı) faiz hədəfi üstün tutulur.
     """
@@ -195,21 +195,18 @@ def suggest_ebay_price(
         if p:
             candidates.append(p)
     else:
-        target = target_profit_for(amazon_new)
+        floor = target_profit_for(amazon_new)
 
-        # Cari qiymət onsuz da məqbul zonadadırsa TƏKLİF VERMİRİK.
-        # Boş xana = "toxunma, hər şey qaydasındadır" deməkdir.
-        # Əks halda sheet "qiyməti aşağı sal" yazır, avtomatika isə
-        # toxunmur — bir-birinə zidd iki siqnal alırdınız.
         if ebay_price is not None:
             cur, _ = margin(ebay_price, amazon_new)
-            if cur is not None and (
-                    target - config.AUTO_PRICE_UP_TOLERANCE
-                    <= cur
-                    <= target + config.AUTO_PRICE_DOWN_TOLERANCE):
-                return None
+            if cur is not None and cur >= floor - config.AUTO_PRICE_UP_TOLERANCE:
+                # Hədd ödənilir.
+                if not config.AUTO_PRICE_ALLOW_DOWN:
+                    return None   # boş xana = "toxunma, qaydasındadır"
+                if cur <= floor + config.AUTO_PRICE_DOWN_TOLERANCE:
+                    return None
 
-        p = price_for_profit(target, amazon_new)
+        p = price_for_profit(floor, amazon_new)
         if p:
             candidates.append(p)
 
@@ -417,18 +414,26 @@ def plan_price_change(
     """
     Qiymətin dəyişdirilməli olub-olmadığını qərara alır.
 
+    ƏSAS QAYDA — hədəf yox, HƏDD:
+      qazanc həddən AZDIRSA  -> qiymət qaldırılır
+      qazanc həddən ÇOXDURSA -> toxunulmur (yalnız "ucuzlaşdıra bilərsiniz"
+                                 məsləhəti qeyd olunur)
+    Avtomatik ucuzlaşdırma yalnız AUTO_PRICE_ALLOW_DOWN=1 olduqda baş verir.
+
     Qaytarır:
       {"new_price": float|None,   # None = dəyişiklik lazım deyil / mümkün deyil
        "direction": "up"|"down"|None,
-       "target_profit": float,
+       "target_profit": float,    # minimum qazanc həddi
        "current_profit": float|None,
        "new_profit": float|None,
-       "capped": bool,            # hədd səbəbindən hədəfə çatmadı
+       "capped": bool,            # təhlükəsizlik həddi tətbiq olundu
        "below_min": bool,         # hədd sonrası qazanc MIN_PROFIT_USD-dən az
+       "could_lower": float|None, # ucuzlaşdırıla biləcək qiymət (məsləhət)
        "reason": str}
     """
     out = {"new_price": None, "direction": None, "capped": False,
            "below_min": False, "current_profit": None, "new_profit": None,
+           "could_lower": None,
            "target_profit": target_profit_for(amazon_price), "reason": ""}
 
     if not in_stock:
@@ -445,13 +450,25 @@ def plan_price_change(
         out["reason"] = "cari qazanc hesablana bilmədi"
         return out
 
-    # Qazanc hədəfin ətrafındadırsa toxunmuruq (qiymətin oynamaması üçün)
+    # --- Hədd ödənilirmi? ---
     if cur_profit >= target - config.AUTO_PRICE_UP_TOLERANCE:
+
         if cur_profit <= target + config.AUTO_PRICE_DOWN_TOLERANCE:
-            out["reason"] = f"qazanc hədəfə uyğundur (${cur_profit:.2f} ≈ ${target:.2f})"
+            out["reason"] = (f"qazanc həddi ödəyir "
+                             f"(${cur_profit:.2f} ≥ ${target:.2f})")
             return out
+
+        # Qazanc həddən xeyli çoxdur. Bu, problem DEYİL — sadəcə istəsəniz
+        # ucuzlaşdırıb daha rəqabətli ola biləcəyiniz qeyd olunur.
+        cheaper = price_for_profit(target, amazon_price)
+        if cheaper:
+            cheaper = _round_price(cheaper)
+            if cheaper < current_price - config.AUTO_PRICE_MIN_DIFF_USD:
+                out["could_lower"] = cheaper
+
         if not config.AUTO_PRICE_ALLOW_DOWN:
-            out["reason"] = "qazanc hədəfdən çoxdur, amma azaltma bağlıdır"
+            out["reason"] = (f"qazanc həddən çoxdur (${cur_profit:.2f} > "
+                             f"${target:.2f}) — toxunulmur")
             return out
 
     ideal = price_for_profit(target, amazon_price)

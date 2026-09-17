@@ -30,14 +30,12 @@ COL = {
     "last_check":    13,   # M
     "next_check":    14,   # N  <- növbəti yoxlama vaxtı (kredit qənaəti)
     "status":        15,   # O
-    "auto":          16,   # P  <- avtomatik dəyişikliyə icazə (siz yazırsınız)
-    "auto_log":      17,   # Q  <- bot nə etdi (audit izi, bot yazır)
 }
 HEADERS = [
     "eBay Link", "Amazon Link", "Məhsul Adı", "eBay Qiymətim", "eBay Say",
     "Amazon (əvvəlki)", "Amazon (indiki)", "Stok",
     "eBay Haqqı", "Marja $", "Marja %", "Tövsiyə eBay",
-    "Son Yoxlama", "Növbəti Yoxlama", "Status", "Avto", "Avto Əməliyyat",
+    "Son Yoxlama", "Növbəti Yoxlama", "Status",
 ]
 FIRST_DATA_ROW = 2
 
@@ -275,11 +273,16 @@ QTY_WHEN_LOW = int(os.environ.get("QTY_WHEN_LOW", "1"))
 # ---------------------------------------------------------------------------
 # AVTOMATİK QİYMƏT İDARƏSİ
 # ---------------------------------------------------------------------------
-# Hər satışdan hədəf TƏMİZ qazanc (bütün haqlar çıxıldıqdan sonra).
-# Format: "Amazon_qiymət_həddi:hədəf_qazanc" — sıra ilə yoxlanılır.
-#   20:5   -> Amazon $20-a qədərdirsə hədəf $5
-#   50:7   -> $20-50 arası  -> $7
-#   1e9:10 -> $50-dən baha  -> $10
+# Hər satışdan MİNİMUM təmiz qazanc (bütün haqlar çıxıldıqdan sonra).
+#
+# DİQQƏT — bu HƏDD-dir, HƏDƏF deyil:
+#   qazanc bundan azdırsa  -> qiymət qaldırılır
+#   qazanc bundan çoxdursa -> TOXUNULMUR (çox qazanc problem deyil)
+#
+# Format: "Amazon_qiymət_həddi:minimum_qazanc"
+#   20:5   -> Amazon $20-a qədərdirsə ən az $5
+#   50:7   -> $20-50 arası  -> ən az $7
+#   1e9:10 -> $50-dən baha  -> ən az $10
 PROFIT_TIERS_RAW = os.environ.get("PROFIT_TIERS", "20:5,50:7,1000000:10")
 
 # Bu məbləğdən az qazanc verən məhsul sərf etmir — bildiriş göndərilir.
@@ -287,11 +290,19 @@ MIN_PROFIT_USD = float(os.environ.get("MIN_PROFIT_USD", "5"))
 
 AUTO_PRICE = _flag("AUTO_PRICE", False)
 
-# Qiymətin AŞAĞI salınmasına icazə (Amazon ucuzlaşanda rəqabətli qalmaq üçün).
-AUTO_PRICE_ALLOW_DOWN = _flag("AUTO_PRICE_ALLOW_DOWN", True)
+# Qiymətin AŞAĞI salınmasına icazə.
+#
+# DEFOLT BAĞLIDIR və buna ciddi səbəb var: hədd dollarla olduğu üçün açıq
+# olanda yaxşı qazanan məhsullar da hədd səviyyəsinə "endirilir".
+# Real mağazada ölçdük: 22 məhsulun qiyməti enirdi, ümumi qazanc
+# $508 → $294 düşürdü (bir məhsul $136 qazancdan $11-ə enirdi).
+#
+# Açıq olmadıqda sistem yalnız AZ qazanclı məhsulun qiymətini qaldırır,
+# çox qazanclıya toxunmur — amma "ucuzlaşdıra bilərsiniz" bildirişi göndərir.
+AUTO_PRICE_ALLOW_DOWN = _flag("AUTO_PRICE_ALLOW_DOWN", False)
 
-# Qazanc hədəfdən bu qədər ÇOX olanda qiymət aşağı salınır.
-# Kiçik dalğalanmalarda qiymətin oynamaması üçün lazımdır.
+# Qazanc həddən bu qədər ÇOX olanda "ucuzlaşdıra bilərsiniz" bildirişi gedir
+# (AUTO_PRICE_ALLOW_DOWN=1 olarsa qiymət avtomatik enir).
 AUTO_PRICE_DOWN_TOLERANCE = float(os.environ.get("AUTO_PRICE_DOWN_TOLERANCE", "2.00"))
 
 # Qazanc hədəfdən bu qədər AZ olanda qiymət qaldırılır.
@@ -325,33 +336,9 @@ PROFIT_TIERS = _parse_tiers(PROFIT_TIERS_RAW)
 # Bir neçə gün nəticələrə baxıb əmin olandan sonra "0" edin.
 AUTO_DRY_RUN = _flag("AUTO_DRY_RUN", True)
 
-# Sətir üzrə icazə — P sütunu ("Avto"). Nə yaza bilərsiniz:
-#   beli / he / yes / 1   -> həm say, həm qiymət avtomatik
-#   say  / sayi / qty     -> yalnız say
-#   qiymet / qiymət/price -> yalnız qiymət
-#   boş / yox             -> heç nəyə toxunulmur
-AUTO_ALLOW_VALUES = {"beli", "bəli", "he", "hə", "yes", "y", "1", "true", "var", "ok"}
-AUTO_QTY_ONLY_VALUES = {"say", "sayi", "sayı", "qty", "quantity", "stok"}
-AUTO_PRICE_ONLY_VALUES = {"qiymet", "qiymət", "price", "qiy"}
-
-
-def auto_modes(cell_value: str) -> set:
-    """P sütunundakı dəyərdən icazə verilən rejimləri çıxarır."""
-    v = str(cell_value or "").strip().lower()
-    if not v:
-        return set()
-    if v in AUTO_ALLOW_VALUES:
-        return {"qty", "price"}
-    if v in AUTO_QTY_ONLY_VALUES:
-        return {"qty"}
-    if v in AUTO_PRICE_ONLY_VALUES:
-        return {"price"}
-    return set()
-
-
-def auto_allowed(cell_value: str) -> bool:
-    """Geriyə uyğunluq — hər hansı avtomatikaya icazə varmı?"""
-    return bool(auto_modes(cell_value))
+# Sətir üzrə icazə sütunu ARTIQ YOXDUR.
+# Bütün məhsullar avtomatik idarə olunur — sheet-də heç nə yazmaq lazım deyil.
+# Sistemi tam dayandırmaq üçün GitHub Variables-da AUTO_QTY=0 / AUTO_PRICE=0.
 
 # eBay səhifəsi neçə gündən bir tam yenilənsin.
 # Öz listinginizin qiymətini siz təyin etdiyiniz üçün tez-tez oxumağa ehtiyac yoxdur —
