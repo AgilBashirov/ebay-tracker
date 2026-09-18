@@ -105,6 +105,11 @@ jobs:
           ALERT_ON_PRICE_DROP: ${{ vars.ALERT_ON_PRICE_DROP || secrets.ALERT_ON_PRICE_DROP || '0' }}
           DELAY_MIN_SEC: ${{ vars.DELAY_MIN_SEC || secrets.DELAY_MIN_SEC || '8' }}
           DELAY_MAX_SEC: ${{ vars.DELAY_MAX_SEC || secrets.DELAY_MAX_SEC || '22' }}
+          # Cədvəlin görünüşü — hər işləmədə avtomatik tətbiq olunur
+          SHEET_SHORT_LINKS: ${{ vars.SHEET_SHORT_LINKS || secrets.SHEET_SHORT_LINKS || '1' }}
+          SHEET_TRIM_GRID: ${{ vars.SHEET_TRIM_GRID || secrets.SHEET_TRIM_GRID || '1' }}
+          SHEET_SPARE_ROWS: ${{ vars.SHEET_SPARE_ROWS || secrets.SHEET_SPARE_ROWS || '20' }}
+          SHEET_AUTO_SORT: ${{ vars.SHEET_AUTO_SORT || secrets.SHEET_AUTO_SORT || '0' }}
           PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/src
         run: python src/main.py
 

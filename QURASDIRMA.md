@@ -211,6 +211,39 @@ eBay listinginizdəki qalıq say nəzərə alınır ki, lazımsız bildiriş gə
 
 ---
 
+## Cədvəlin görünüşü
+
+Cədvəl hər işləmədə özü səliqəyə düşür — əl ilə heç nə etmək lazım deyil:
+
+* **Linklər qısalır.** A və B sütunlarında uzun URL yerinə klikləyə biləcəyiniz
+  "eBay" / "Amazon" yazısı görünür. URL itmir — `=HYPERLINK(...)` düsturunun
+  içində qalır və sistem onu oradan oxuyur.
+* **Rəqəmlər əsl rəqəmdir.** Qiymət və marja sütunları dollar formatında,
+  Marja % faiz formatında, tarixlər `yyyy-mm-dd hh:mm` formatındadır — yəni
+  sıralama, filtr və cəm düzgün işləyir (mətn kimi saxlansaydı işləməzdi).
+* **Zolaqlı sətirlər.** Uzun siyahıda sətri itirməmək üçün açıq/ağ növbələşmə.
+  Yoxlanılmış sətirlərdə status rəngi zolağın üstündə görünür.
+* **Avtomatik filtr.** Başlıq sətrindəki oxlarla istənilən sütuna görə
+  süzə və ya sırala bilərsiniz (məsələn yalnız "STOK YOX" olanlar).
+* **Artıq yer kəsilir.** Məhsullardan sonrakı minlərlə boş sətir və O-dan
+  sonrakı sütunlar silinir; yeni məhsul yazmaq üçün 20 boş sətir saxlanılır.
+
+Bunları GitHub → Settings → Variables-dan söndürə bilərsiniz:
+
+| Dəyişən | Defolt | Nə edir |
+|---|---|---|
+| `SHEET_SHORT_LINKS` | `1` | Linkləri qısaldır |
+| `SHEET_TRIM_GRID` | `1` | Artıq sətir/sütunları silir |
+| `SHEET_SPARE_ROWS` | `20` | Sonda saxlanılan boş sətir sayı |
+| `SHEET_AUTO_SORT` | `0` | Hər işləmədə statusa görə sıralayır |
+
+`SHEET_AUTO_SORT` defolt bağlıdır: açıq olanda məhsullar hər işləmədə yerini
+dəyişir. Filtr onsuz da qoyulduğu üçün bir kliklə özünüz sıralaya bilərsiniz.
+
+**Sütunları ƏL İLƏ silməyin və yerini dəyişməyin** — sistem onlara nömrə ilə
+müraciət edir. Lazımsız görünən I, K və N sütunları elə bu səbəbdən silinmir,
+sadəcə gizlədilir.
+
 ## Avtomatik idarəetmə (say + qiymət)
 
 Sistem eBay listinqlərinizi özü tənzimləyə bilər. **Hər şey defolt BAĞLIDIR** —

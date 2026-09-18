@@ -390,6 +390,198 @@ check("bütün sətirlərdə növbəti yoxlama var",
       all(v.get("next_check") for v in W.values()), True)
 
 # ===========================================================================
+section("12. CƏDVƏLİN SƏLİQƏSİ — link, format, kəsim (saxta worksheet)")
+# ===========================================================================
+# Google-a BİR sorğu da getmir: sahte worksheet bütün çağırışları yazıya alır.
+
+
+class FakeSpreadsheet:
+    def __init__(self, ws):
+        self.ws = ws
+        self.requests = []
+
+    def batch_update(self, body):
+        self.requests.extend(body["requests"])
+        return {}
+
+    def fetch_sheet_metadata(self):
+        sheet = {"properties": {
+            "sheetId": self.ws.id,
+            "gridProperties": {"rowCount": self.ws.row_count,
+                               "columnCount": self.ws.col_count}}}
+        if self.ws.banded:
+            sheet["bandedRanges"] = self.ws.banded
+        return {"sheets": [sheet]}
+
+
+class FakeWorksheet:
+    def __init__(self, grid, rows=1000, cols=26, banded=None):
+        self.id = 7
+        self.grid = [list(r) for r in grid]
+        self.row_count, self.col_count = rows, cols
+        self.banded = banded or []
+        self.spreadsheet = FakeSpreadsheet(self)
+        self.render, self.header_writes, self.cleared, self.value_updates = \
+            {}, [], [], []
+
+    def get_all_values(self, **kw):
+        self.render = kw
+        return [list(r) for r in self.grid]
+
+    def update(self, values=None, range_name=None):
+        self.header_writes.append(range_name)
+
+    def batch_clear(self, ranges):
+        self.cleared.extend(ranges)
+
+    def batch_update(self, data, value_input_option=None, **kw):
+        self.value_updates.extend(data)
+
+
+EBAY_URL = "https://www.ebay.com/itm/157968828656"
+AMZ_URL = "https://www.amazon.com/dp/B0D9GK5KXS"
+
+
+def kinds(reqs):
+    return [k for r in reqs for k in r]
+
+
+def one(reqs, kind):
+    return next((r[kind] for r in reqs if kind in r), None)
+
+
+def build_grid(tidy=False):
+    """
+    3 məhsulluq saxta cədvəl.
+
+    tidy=False -> köhnə vəziyyət: başlıq səhv, xam URL, P/Q sütunları qalıb
+    tidy=True  -> artıq səliqəyə salınmış cədvəl (təkrar işləməni yoxlamaq üçün)
+    """
+    if tidy:
+        a = sheets._hyperlink_formula(EBAY_URL, "eBay")
+        b = sheets._hyperlink_formula(AMZ_URL, "Amazon")
+        head, extra = list(config.HEADERS), []
+    else:
+        a, b = EBAY_URL, AMZ_URL
+        head = ["Link"] + config.HEADERS[1:] + ["Avto", "Avto Əməliyyat"]
+        extra = ["hamisi", "köhnə qeyd"]
+    body = [[a, b, f"Məhsul {n}", 52.99, 3, 40.0, 41.5, "In Stock", 9.1,
+             5.4, 0.102, 54.99, "2026-09-18 10:00", "2026-09-19 10:00", "OK"]
+            + extra for n in (1, 2, 3)]
+    return [head] + body
+
+
+# --- 12a) Xam URL-li cədvəl: hər şey qurulur --------------------------------
+ws = FakeWorksheet(build_grid())
+sheets.ensure_structure(ws)
+reqs = ws.spreadsheet.requests
+
+check("FORMULA rejimində oxunur",
+      ws.render.get("value_render_option"), "FORMULA")
+check("tarixlər mətn kimi gəlir",
+      ws.render.get("date_time_render_option"), "FORMATTED_STRING")
+check("səhv başlıq düzəldilir", ws.header_writes, ["A1:O1"])
+check("köhnə P/Q sütunları təmizlənir", ws.cleared, ["P:Q"])
+
+check("6 link qısaldıldı (3 sətir × 2)", len(ws.value_updates), 6)
+_f = ws.value_updates[0]["values"][0][0]
+check("   düstur HYPERLINK-dir", _f.startswith("=HYPERLINK("), True)
+check("   URL düsturun içində qalır", EBAY_URL in _f, True)
+check("   xanada qısa ad görünür", _f.endswith('"eBay")'), True)
+check("   diapazon A2-dir", ws.value_updates[0]["range"], "A2")
+
+_del = [r["deleteDimension"]["range"] for r in reqs if "deleteDimension" in r]
+_cols = next((d for d in _del if d["dimension"] == "COLUMNS"), None)
+_rows = next((d for d in _del if d["dimension"] == "ROWS"), None)
+check("P-dən sonrakı sütunlar silinir", (_cols["startIndex"], _cols["endIndex"]),
+      (15, 26))
+# 4 dolu sətir + 20 ehtiyat = 24; silinmə 0-indeksli 24-dən, yəni 25-ci sətirdən
+check("boş sətirlər 25-dən silinir", (_rows["startIndex"], _rows["endIndex"]),
+      (24, 1000))
+check("MƏLUMATLI sətir silinmir", _rows["startIndex"] >= 4, True)
+
+check("zolaqlı sətirlər əlavə olunur", "addBanding" in kinds(reqs), True)
+check("mövcud zolaq yenilənmir (hələ yoxdur)",
+      "updateBanding" in kinds(reqs), False)
+check("avtomatik filtr qoyulur",
+      one(reqs, "setBasicFilter")["filter"]["range"]["endRowIndex"], 4)
+check("defolt olaraq sıralanmır (SHEET_AUTO_SORT=0)",
+      "sortRange" in kinds(reqs), False)
+
+_fmts = [r["repeatCell"]["cell"]["userEnteredFormat"]["numberFormat"]
+         for r in reqs
+         if "repeatCell" in r
+         and "numberFormat" in r["repeatCell"]["cell"]["userEnteredFormat"]]
+check("dollar formatı var (D, F, G, I, J, L)",
+      sum(1 for f in _fmts if f["type"] == "CURRENCY"), 6)
+check("faiz formatı var (K)", sum(1 for f in _fmts if f["type"] == "PERCENT"), 1)
+check("tarix formatı _parse_dt ilə eynidir",
+      next(f["pattern"] for f in _fmts if f["type"] == "DATE_TIME"),
+      "yyyy-mm-dd hh:mm")
+
+# --- 12b) İkinci işləmə: heç nə təkrarlanmır --------------------------------
+ws2 = FakeWorksheet(build_grid(tidy=True), rows=24, cols=15,
+                    banded=[{"bandedRangeId": 11}])
+sheets.ensure_structure(ws2)
+reqs2 = ws2.spreadsheet.requests
+check("qısaldılmış linklərə yenidən toxunulmur", len(ws2.value_updates), 0)
+check("düzgün başlıq yenidən yazılmır", ws2.header_writes, [])
+check("artıq sütun yoxdur — təmizlik sorğusu getmir", ws2.cleared, [])
+check("kəsiləcək yer yoxdur", "deleteDimension" in kinds(reqs2), False)
+check("mövcud zolaq YENİLƏNİR (üst-üstə düşmə xətası olmur)",
+      "updateBanding" in kinds(reqs2), True)
+check("ikinci zolaq ƏLAVƏ edilmir", "addBanding" in kinds(reqs2), False)
+
+# --- 12c) Linkin oxunması: hər iki forma -----------------------------------
+for ad, xana, gozlenen in [
+    ("xam URL", EBAY_URL, EBAY_URL),
+    ("HYPERLINK (vergül)", f'=HYPERLINK("{EBAY_URL}","eBay")', EBAY_URL),
+    ("HYPERLINK (nöqtəli vergül)", f'=HYPERLINK("{EBAY_URL}";"eBay")', EBAY_URL),
+    ("protokolsuz", "amazon.com/dp/B0D9GK5KXS", AMZ_URL.replace("www.", "www.")),
+    ("boş xana", "", ""),
+    # Link olmayan məzmun ATILMIR, olduğu kimi qaytarılır: boş saysaq sətir
+    # sakitcə ötürülərdi, belə isə main.py onu "XETA link yoxdur" edir.
+    ("səhv məzmun olduğu kimi qalır", 52.99, "52.99"),
+]:
+    check(f"link oxunur — {ad}", sheets._cell_link(xana), gozlenen)
+
+check("düsturlu cədvəldən sətirlər düzgün oxunur",
+      [(r["ebay_link"], r["amazon_link"], r["ebay_qty"], r["ebay_price"])
+       for r in sheets.read_rows(FakeWorksheet(build_grid(tidy=True)))][0],
+      (EBAY_URL, AMZ_URL, 3, 52.99))
+
+# FORMULA rejimi rəqəmi float kimi qaytarır — "3.0" say 30 olmamalıdır
+check("say 3.0 → 3 (30 yox)", sheets._to_int(3.0), 3)
+check("say '3 ədəd' → 3", sheets._to_int("3 ədəd"), 3)
+check("say 0 → 0", sheets._to_int(0), 0)
+check("qiymət '$52.99' → 52.99", sheets._to_float("$52.99"), 52.99)
+
+# --- 12d) Sıralama açıq olanda ---------------------------------------------
+os.environ["SHEET_AUTO_SORT"] = "1"
+importlib.reload(config)
+ws3 = FakeWorksheet(build_grid(tidy=True), rows=24, cols=15)
+sheets.ensure_structure(ws3)
+_sort = one(ws3.spreadsheet.requests, "sortRange")
+check("SHEET_AUTO_SORT=1 → sıralanır", _sort is not None, True)
+check("   Status sütununa görə", _sort["sortSpecs"][0]["dimensionIndex"],
+      config.COL["status"] - 1)
+check("   başlıq sətri sıralamaya girmir", _sort["range"]["startRowIndex"], 1)
+os.environ["SHEET_AUTO_SORT"] = "0"
+importlib.reload(config)
+
+# --- 12e) Yazma diapazonu dəyişməyib ---------------------------------------
+ws4 = FakeWorksheet(build_grid(tidy=True), rows=24, cols=15)
+sheets.write_results(ws4, [{"row": 2, "product_name": "X", "ebay_price": 52.99,
+                            "ebay_qty": 3, "amazon_old": 40.0, "amazon_new": 41.5,
+                            "stock": "In Stock", "ebay_fee": 9.1,
+                            "margin_usd": 5.4, "margin_pct": 10.2,
+                            "suggested_ebay": 54.99,
+                            "next_check": "2026-09-19 10:00", "status": "OK"}])
+check("C:O diapazonuna yazılır", ws4.value_updates[0]["range"], "C2:O2")
+check("13 xana yazılır — A/B linklərinə toxunulmur",
+      len(ws4.value_updates[0]["values"][0]), 13)
+
+# ===========================================================================
 section("NƏTİCƏ")
 # ===========================================================================
 print(f"\n  Keçdi: {len(PASS)}   Uğursuz: {len(FAIL)}")

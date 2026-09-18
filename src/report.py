@@ -47,7 +47,9 @@ def _categorize(status: str) -> str:
 
 def main():
     ws = sheets.open_sheet()
-    values = ws.get_all_values()
+    # sheets.read_grid: A/B linkləri =HYPERLINK düsturudur, adi oxumada
+    # yalnız "eBay" yazısı gələrdi və hesabatdakı keçidlər sınardı.
+    values = sheets.read_grid(ws)
 
     counts = {}
     attention = []   # diqqət tələb edən məhsullar (ad + status)
@@ -60,20 +62,20 @@ def main():
     attention_keys = {k for k, _, need in CATEGORIES if need}
 
     for raw in values[config.FIRST_DATA_ROW - 1:]:
-        padded = raw + [""] * (len(config.HEADERS) - len(raw))
-        if not padded[config.COL["amazon_link"] - 1].strip():
+        padded = list(raw) + [""] * (len(config.HEADERS) - len(raw))
+        if not sheets._cell_link(padded[config.COL["amazon_link"] - 1]):
             continue
         total += 1
 
-        status = padded[config.COL["status"] - 1].strip()
+        status = _cell(padded[config.COL["status"] - 1])
         key = _categorize(status)
         counts[key] = counts.get(key, 0) + 1
 
         if key in attention_keys:
-            name = padded[config.COL["product_name"] - 1].strip() or "(adsız)"
+            name = _cell(padded[config.COL["product_name"] - 1]) or "(adsız)"
             attention.append((key, name))
 
-        if not padded[config.COL["ebay_price"] - 1].strip():
+        if not _cell(padded[config.COL["ebay_price"] - 1]):
             missing_ebay_price += 1
 
         # Qazancı həddən xeyli çox olan məhsullar — məcburiyyət yoxdur, amma
@@ -84,16 +86,17 @@ def main():
             plan = pricing.plan_price_change(ep, ap)
             if plan.get("could_lower") and not plan.get("new_price"):
                 could_lower.append({
-                    "name": padded[config.COL["product_name"] - 1].strip()
+                    "name": _cell(padded[config.COL["product_name"] - 1])
                             or "(adsız)",
                     "current_price": ep,
                     "current_profit": plan.get("current_profit"),
                     "suggested": plan["could_lower"],
                     "floor": plan.get("target_profit"),
-                    "ebay_link": padded[config.COL["ebay_link"] - 1].strip(),
+                    "ebay_link": sheets._cell_link(
+                        padded[config.COL["ebay_link"] - 1]),
                 })
 
-        last = padded[config.COL["last_check"] - 1].strip()
+        last = _cell(padded[config.COL["last_check"] - 1])
         if not last:
             stale += 1
         else:
@@ -118,6 +121,11 @@ def main():
     print({"total": total, "counts": counts, "stale": stale,
            "missing_ebay_price": missing_ebay_price,
            "could_lower": len(could_lower)})
+
+
+def _cell(value) -> str:
+    """Xananın mətni — rəqəm xanası mətn deyil, float qaytara bilər."""
+    return "" if value is None else str(value).strip()
 
 
 def _money(raw: str):

@@ -16,6 +16,9 @@ import config
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
+# Xananın içindən URL çıxarmaq üçün (xam link və ya =HYPERLINK düsturu)
+_URL_RE = re.compile(r'https?://[^"\'\s,;]+')
+
 # Google-un müvəqqəti xətaları. Bunlar bizim kodun problemi deyil —
 # Google tərəfdə qısamüddətli nasazlıqdır və təkrar cəhdlə keçib gedir.
 RETRYABLE_CODES = (429, 500, 502, 503, 504)
@@ -81,20 +84,175 @@ def open_sheet():
 # ---------------------------------------------------------------------------
 
 def ensure_structure(ws):
-    """Başlıqları qoyur, artıq sütunları təmizləyir və görünüşü tənzimləyir."""
-    current = with_retry(ws.row_values, 1, what="Başlıqların oxunması")
-    if current[: len(config.HEADERS)] != config.HEADERS:
+    """
+    Cədvəli səliqəyə salır — hər işləmənin əvvəlində, bir dəfə.
+
+      1. Başlıqları qoyur
+      2. Uzun URL-ləri qısa, klikləyə bilən yazıya çevirir
+      3. (istənilsə) sətirləri statusa görə sıralayır
+      4. Formatı tətbiq edir: rəqəm formatları, zolaqlı sətirlər, filtr
+      5. Məhsullardan sonrakı boş sahəni kəsir
+
+    Bütün addımlar TƏKRAR TƏHLÜKƏSİZDİR: ikinci dəfə işləyəndə heç nə
+    dəyişmir, artıq düzgün olan sahəyə toxunulmur.
+    """
+    values = read_grid(ws)
+    header = values[0] if values else []
+    if header[: len(config.HEADERS)] != config.HEADERS:
         ws.update(
             values=[config.HEADERS],
             range_name=f"A1:{_col_letter(len(config.HEADERS))}1",
         )
 
+    last_row = _last_data_row(values)
+    meta = _sheet_meta(ws)
+
     # Struktur dəyişəndə (məsələn "Avto" sütunları silinəndə) sağda qalan
     # köhnə məlumatı təmizləyirik — əks halda sheet-də mənasız sütunlar qalır.
-    _clear_extra_columns(ws, len(current))
+    _clear_extra_columns(ws, len(header))
 
-    apply_layout(ws)
+    if config.SHEET_SHORT_LINKS:
+        _shorten_links(ws, values)
+
+    # Sıralama MÜTLƏQ read_rows-dan əvvəl olmalıdır: nəticələr sətir nömrəsi
+    # ilə yazılır, sıra sonradan dəyişsə yazı yanlış sətrə düşərdi.
+    if config.SHEET_AUTO_SORT:
+        _sort_by_status(ws, last_row)
+
+    apply_layout(ws, last_row=last_row, meta=meta)
+
+    if config.SHEET_TRIM_GRID:
+        _trim_grid(ws, last_row, meta)
     return True
+
+
+def _safe_batch(ws, requests, what: str) -> bool:
+    """
+    Formatlama sorğuları — biri alınmasa işləmə dayanmamalıdır.
+
+    Ayrı-ayrı çağırışlara bölünür, çünki batch_update ATOMİKDİR: bir sorğu
+    xəta versə (məs. zolaqlı sahə üst-üstə düşsə) həmin paketdəki BÜTÜN
+    formatlar tətbiq olunmur.
+    """
+    if not requests:
+        return False
+    try:
+        ws.spreadsheet.batch_update({"requests": requests})
+        return True
+    except Exception as e:
+        print(f"[sheets] {what} tətbiq edilə bilmədi: {e}")
+        return False
+
+
+def _sheet_meta(ws) -> dict:
+    """Bu vərəqin cari metaməlumatı: ölçüsü və mövcud zolaqlı sahələri."""
+    try:
+        meta = with_retry(ws.spreadsheet.fetch_sheet_metadata,
+                          what="Cədvəl metaməlumatı")
+    except Exception as e:
+        print(f"[sheets] Metaməlumat oxuna bilmədi: {e}")
+        return {}
+    for sh in meta.get("sheets", []):
+        if sh.get("properties", {}).get("sheetId") == ws.id:
+            return sh
+    return {}
+
+
+def _grid_size(meta: dict, ws) -> tuple[int, int]:
+    """(sətir sayı, sütun sayı) — metaməlumat yoxdursa gspread-in dəyəri."""
+    grid = (meta.get("properties") or {}).get("gridProperties") or {}
+    return (int(grid.get("rowCount") or ws.row_count),
+            int(grid.get("columnCount") or ws.col_count))
+
+
+def _last_data_row(values) -> int:
+    """
+    Məlumatı olan sonuncu sətrin nömrəsi.
+
+    Yalnız linkə deyil, İSTƏNİLƏN dolu xanaya baxırıq — yarımçıq doldurulmuş
+    sətri "boş" sayıb silmək olmaz.
+    """
+    need = len(config.HEADERS)
+    last = 1
+    for i, raw in enumerate(values, start=1):
+        if any(str(c).strip() for c in raw[:need]):
+            last = i
+    return last
+
+
+def _shorten_links(ws, values) -> None:
+    """
+    A/B sütunlarındaki uzun URL-ləri "eBay" / "Amazon" yazısına çevirir.
+
+    URL İTMİR — =HYPERLINK("...","eBay") düsturunun içində qalır və
+    read_grid onu FORMULA rejimində geri oxuyur. Artıq çevrilmiş xanalara
+    toxunulmur, ona görə hər işləmədə təkrar sorğu getmir.
+    """
+    updates = []
+    for i, raw in enumerate(values[config.FIRST_DATA_ROW - 1:],
+                            start=config.FIRST_DATA_ROW):
+        for key, label in LINK_COLUMNS:
+            col = config.COL[key]
+            cell = _text(raw[col - 1] if len(raw) >= col else "")
+            if not cell or cell.startswith("="):
+                continue                      # boşdur və ya onsuz da qısadır
+            url = _fix_link(cell)
+            if not url.lower().startswith("http"):
+                continue                      # link deyil — toxunmuruq
+            updates.append({"range": f"{_col_letter(col)}{i}",
+                            "values": [[_hyperlink_formula(url, label)]]})
+    if not updates:
+        return
+    try:
+        with_retry(ws.batch_update, updates, value_input_option="USER_ENTERED",
+                   what="Linklərin qısaldılması")
+        print(f"[sheets] {len(updates)} link qısaldıldı")
+    except Exception as e:
+        print(f"[sheets] Linklər qısaldıla bilmədi: {e}")
+
+
+def _sort_by_status(ws, last_row: int) -> None:
+    """Sətirləri Status sütununa görə sıralayır (eyni problemlər yan-yana)."""
+    if last_row <= config.FIRST_DATA_ROW:
+        return
+    _safe_batch(ws, [{
+        "sortRange": {
+            "range": {"sheetId": ws.id,
+                      "startRowIndex": config.FIRST_DATA_ROW - 1,
+                      "endRowIndex": last_row,
+                      "startColumnIndex": 0,
+                      "endColumnIndex": len(config.HEADERS)},
+            "sortSpecs": [{"dimensionIndex": config.COL["status"] - 1,
+                           "sortOrder": "ASCENDING"}],
+        }
+    }], "Sıralama")
+
+
+def _trim_grid(ws, last_row: int, meta: dict) -> None:
+    """
+    Məhsullardan sonrakı boş sətirləri və O-dan sonrakı sütunları SİLİR.
+
+    Məlumatı olan heç bir sətir silinmir — sərhəd _last_data_row ilə
+    hesablanır və üstünə SHEET_SPARE_ROWS qədər ehtiyat əlavə olunur ki,
+    yeni məhsul yazmaq üçün yer qalsın.
+    """
+    need_cols = len(config.HEADERS)
+    rows_now, cols_now = _grid_size(meta, ws)
+    keep_rows = max(last_row + max(config.SHEET_SPARE_ROWS, 0),
+                    config.FIRST_DATA_ROW)
+
+    reqs = []
+    if cols_now > need_cols:
+        reqs.append({"deleteDimension": {"range": {
+            "sheetId": ws.id, "dimension": "COLUMNS",
+            "startIndex": need_cols, "endIndex": cols_now}}})
+    if rows_now > keep_rows:
+        reqs.append({"deleteDimension": {"range": {
+            "sheetId": ws.id, "dimension": "ROWS",
+            "startIndex": keep_rows, "endIndex": rows_now}}})
+    if reqs and _safe_batch(ws, reqs, "Artıq sahənin kəsilməsi"):
+        print(f"[sheets] Cədvəl {keep_rows} sətir × {need_cols} sütuna salındı "
+              f"(əvvəl {rows_now} × {cols_now})")
 
 
 def _clear_extra_columns(ws, current_width: int) -> None:
@@ -111,16 +269,22 @@ def _clear_extra_columns(ws, current_width: int) -> None:
         print(f"[sheets] Artıq sütunlar təmizlənə bilmədi: {e}")
 
 
-def apply_layout(ws):
+def apply_layout(ws, last_row: int | None = None, meta: dict | None = None):
     """
     Cədvəlin bütün görünüşünü qurur:
-      - başlıq sətri (tünd fon, ağ qalın mətn, dondurulmuş)
+      - başlıq sətri (tünd fon, ağ qalın mətn, dondurulmuş, altında xətt)
       - sütun enləri
       - mətn daşmasının qarşısı (CLIP) — uzun URL-lər yan xanalara girmir
       - rəqəm sütunları sağa, status/tarix mərkəzə düzülür
+      - rəqəm formatları: dollar, faiz, tarix (mətn kimi yox, ƏSL rəqəm kimi)
+      - zolaqlı sətirlər və başlıq sətrində avtomatik filtr
     """
     last_col = len(config.HEADERS)
     sheet_id = ws.id
+    meta = meta or {}
+    if last_row is None:
+        last_row = _grid_size(meta, ws)[0]
+    last_row = max(last_row, config.FIRST_DATA_ROW)
     reqs = []
 
     # ---- Başlıq ----
@@ -246,10 +410,76 @@ def apply_layout(ws):
         }
     })
 
-    try:
-        ws.spreadsheet.batch_update({"requests": reqs})
-    except Exception as e:
-        print(f"[sheets] Format tətbiq edilə bilmədi: {e}")
+    # ---- Rəqəm formatları ----
+    # Dəyər xanada MƏTN kimi deyil, əsl rəqəm/tarix kimi saxlanılır: cəm,
+    # sıralama və filtr yalnız bu halda düzgün işləyir.
+    def number_format(cols, kind, pattern):
+        for col in cols:
+            reqs.append({
+                "repeatCell": {
+                    "range": {"sheetId": sheet_id, "startRowIndex": 1,
+                              "startColumnIndex": col - 1, "endColumnIndex": col},
+                    "cell": {"userEnteredFormat": {
+                        "numberFormat": {"type": kind, "pattern": pattern}}},
+                    "fields": "userEnteredFormat.numberFormat",
+                }
+            })
+
+    # D qiymət · F/G Amazon · I haqq · J marja · L tövsiyə
+    number_format([4, 6, 7, 9, 10, 12], "CURRENCY", '"$"#,##0.00')
+    number_format([11], "PERCENT", "0.0%")
+    # M/N tarixləri: bu şablon read_grid-in gözlədiyi formatdır — dəyişməyin,
+    # əks halda _parse_dt tarixi oxuya bilməz və hər məhsul "vaxtı çatıb"
+    # sayılar (bütün kredit bir işləmədə yanar).
+    number_format([13, 14], "DATE_TIME", "yyyy-mm-dd hh:mm")
+
+    # ---- Başlığın altında xətt ----
+    reqs.append({
+        "updateBorders": {
+            "range": {"sheetId": sheet_id, "startRowIndex": 0, "endRowIndex": 1,
+                      "startColumnIndex": 0, "endColumnIndex": last_col},
+            "bottom": {"style": "SOLID_MEDIUM",
+                       "color": {"red": 0.10, "green": 0.16, "blue": 0.24}},
+        }
+    })
+
+    _safe_batch(ws, reqs, "Format")
+    _apply_banding(ws, last_row, meta)
+    _safe_batch(ws, [{
+        "setBasicFilter": {"filter": {"range": {
+            "sheetId": sheet_id, "startRowIndex": 0, "endRowIndex": last_row,
+            "startColumnIndex": 0, "endColumnIndex": last_col}}}
+    }], "Avtomatik filtr")
+
+
+def _apply_banding(ws, last_row: int, meta: dict) -> None:
+    """
+    Zolaqlı sətirlər (bir açıq, bir ağ) — uzun cədvəldə sətri itirməmək üçün.
+
+    QEYD: statusa görə sətir rəngi (bax _apply_row_colors) zolağın ÜSTÜNDƏ
+    durur, çünki xanaya birbaşa verilən fon zolaqdan üstündür. Yəni zolaq
+    hələ yoxlanmamış sətirlərdə görünür, yoxlanmışlarda isə status rəngi.
+
+    Mövcud zolaq varsa yenisi ƏLAVƏ edilmir, köhnəsi YENİLƏNİR — əks halda
+    "banded range overlaps" xətası alınır.
+    """
+    banded = {"range": {"sheetId": ws.id, "startRowIndex": 1,
+                        "endRowIndex": max(last_row, 2),
+                        "startColumnIndex": 0,
+                        "endColumnIndex": len(config.HEADERS)},
+              "rowProperties": {
+                  "firstBandColor": {"red": 1, "green": 1, "blue": 1},
+                  "secondBandColor": {"red": 0.97, "green": 0.97, "blue": 0.98}}}
+
+    existing = (meta.get("bandedRanges") or [])
+    if existing:
+        banded["bandedRangeId"] = existing[0]["bandedRangeId"]
+        _safe_batch(ws, [{"updateBanding": {
+            "bandedRange": banded, "fields": "range,rowProperties"}}],
+            "Zolaqlı sətirlər")
+    else:
+        _safe_batch(ws, [{"addBanding": {"bandedRange": banded}}],
+                    "Zolaqlı sətirlər")
 
 
 def _col_letter(idx: int) -> str:
@@ -264,14 +494,68 @@ def _col_letter(idx: int) -> str:
 # Oxuma
 # ---------------------------------------------------------------------------
 
+# A/B sütunlarındaki linklərin qısa adı
+LINK_COLUMNS = (("ebay_link", "eBay"), ("amazon_link", "Amazon"))
+
+
+def read_grid(ws):
+    """
+    Cədvəlin xam məzmunu — bütün oxumalar bu funksiyadan keçir.
+
+    value_render_option="FORMULA":
+        A/B sütunları =HYPERLINK(...) düsturudur; adi rejimdə xanadan
+        yalnız "eBay" yazısı gələrdi və LİNK İTƏRDİ. FORMULA rejimində
+        düsturun özü gəlir, URL onun içindədir.
+
+    date_time_render_option="FORMATTED_STRING":
+        FORMULA rejimi tarixləri seriya nömrəsi kimi qaytarır (46278.41) —
+        bu seçim onları "2026-09-18 10:00" mətni kimi saxlayır ki,
+        _parse_dt oxuya bilsin.
+    """
+    return with_retry(ws.get_all_values,
+                      value_render_option="FORMULA",
+                      date_time_render_option="FORMATTED_STRING",
+                      what="Sətirlərin oxunması")
+
+
+def _text(value) -> str:
+    """Xananın mətni. FORMULA rejimində rəqəm xanası float qaytara bilər."""
+    return "" if value is None else str(value).strip()
+
+
+def _hyperlink_formula(url: str, label: str) -> str:
+    """=HYPERLINK("...","eBay") — URL-dəki dırnaq faiz kodu ilə əvəzlənir."""
+    return '=HYPERLINK("{}","{}")'.format(url.replace('"', "%22"), label)
+
+
+def _cell_link(raw) -> str:
+    """
+    Xanadan URL çıxarır — iki formanı da başa düşür:
+
+        https://www.ebay.com/itm/157...         -> olduğu kimi
+        =HYPERLINK("https://...","eBay")        -> içindəki URL
+
+    Düsturu parçalamırıq, URL-i birbaşa axtarırıq: arqument ayırıcısı
+    (vergül, yoxsa nöqtəli vergül) cədvəlin dilindən asılıdır, həmçinin
+    düstur mətn kimi qalsa belə link yenə tapılır.
+    """
+    text = _text(raw)
+    if not text:
+        return ""
+    if text.startswith("="):
+        found = _URL_RE.search(text)
+        return found.group(0) if found else ""
+    return _fix_link(text)
+
+
 def read_rows(ws):
     """Bütün məhsul sətirlərini oxuyur. Boş sətirlər atlanır."""
-    values = with_retry(ws.get_all_values, what="Sətirlərin oxunması")
+    values = read_grid(ws)
     rows = []
     for i, raw in enumerate(values[config.FIRST_DATA_ROW - 1:], start=config.FIRST_DATA_ROW):
-        padded = raw + [""] * (len(config.HEADERS) - len(raw))
-        amazon = _fix_link(padded[config.COL["amazon_link"] - 1])
-        ebay = _fix_link(padded[config.COL["ebay_link"] - 1])
+        padded = list(raw) + [""] * (len(config.HEADERS) - len(raw))
+        amazon = _cell_link(padded[config.COL["amazon_link"] - 1])
+        ebay = _cell_link(padded[config.COL["ebay_link"] - 1])
         if not amazon and not ebay:
             continue
         rows.append(
@@ -279,15 +563,15 @@ def read_rows(ws):
                 "row": i,
                 "ebay_link": ebay,
                 "amazon_link": amazon,
-                "product_name": padded[config.COL["product_name"] - 1].strip(),
+                "product_name": _text(padded[config.COL["product_name"] - 1]),
                 "ebay_price": _to_float(padded[config.COL["ebay_price"] - 1]),
                 "ebay_qty": _to_int(padded[config.COL["ebay_qty"] - 1]),
                 # Keçən dəfənin "indiki" qiyməti bu dəfənin "əvvəlki"sidir
                 "amazon_old": _to_float(padded[config.COL["amazon_new"] - 1]),
-                "stock_old": padded[config.COL["stock"] - 1].strip(),
-                "last_check": padded[config.COL["last_check"] - 1].strip(),
-                "next_check": padded[config.COL["next_check"] - 1].strip(),
-                "prev_status": padded[config.COL["status"] - 1].strip(),
+                "stock_old": _text(padded[config.COL["stock"] - 1]),
+                "last_check": _text(padded[config.COL["last_check"] - 1]),
+                "next_check": _text(padded[config.COL["next_check"] - 1]),
+                "prev_status": _text(padded[config.COL["status"] - 1]),
             }
         )
     return rows
@@ -316,14 +600,17 @@ def _fix_link(raw: str) -> str:
 
 
 def _to_int(text):
-    if text is None or str(text).strip() == "":
-        return None
+    # Əvvəlcə rəqəm kimi oxumağa çalışırıq: FORMULA rejimində xana "3" yox,
+    # 3.0 qaytara bilər — rəqəmləri bir-birinə yapışdırsaq 30 alınardı.
+    value = _to_float(text)
+    if value is not None:
+        return int(value)
     digits = "".join(ch for ch in str(text) if ch.isdigit())
     return int(digits) if digits else None
 
 
 def _to_float(text):
-    if not text:
+    if text is None or str(text).strip() == "":
         return None
     cleaned = str(text).replace("$", "").replace(",", "").strip()
     try:

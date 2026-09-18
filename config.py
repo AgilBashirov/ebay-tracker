@@ -77,6 +77,29 @@ ALERT_ON_RESTOCK = _flag("ALERT_ON_RESTOCK", False)
 MARGIN_ALERT_PCT = float(os.environ.get("MARGIN_ALERT_PCT", "15.0"))
 
 # ---------------------------------------------------------------------------
+# CƏDVƏLİN GÖRÜNÜŞÜ
+# ---------------------------------------------------------------------------
+# Hər işləmədə avtomatik tətbiq olunur — əl ilə heç nə etmək lazım deyil.
+
+# A/B sütunlarındaki uzun URL-lər klikləyə bilən qısa yazıya çevrilsin
+# ("eBay" / "Amazon"). URL itmir — =HYPERLINK düsturunun içində qalır.
+SHEET_SHORT_LINKS = _flag("SHEET_SHORT_LINKS", True)
+
+# Məhsullardan sonrakı boş sətirlər və O-dan sonrakı sütunlar silinsin.
+SHEET_TRIM_GRID = _flag("SHEET_TRIM_GRID", True)
+
+# Yeni məhsul əlavə edə biləsiniz deyə sonda saxlanılan boş sətir sayı.
+SHEET_SPARE_ROWS = int(os.environ.get("SHEET_SPARE_ROWS", "20"))
+
+# Hər işləmədə sətirlər statusa görə yenidən sıralansın.
+#
+# DEFOLT BAĞLIDIR: kod sətirlərə NÖMRƏ ilə müraciət edir, ona görə sıralama
+# yalnız işləmənin ƏN ƏVVƏLİNDƏ, məlumat oxunmazdan qabaq təhlükəsizdir.
+# Açıq olanda məhsullar hər işləmədə yerini dəyişir — buna alışmaq lazımdır.
+# Filtr onsuz da qoyulur, ona görə bir kliklə özünüz də sıralaya bilərsiniz.
+SHEET_AUTO_SORT = _flag("SHEET_AUTO_SORT", False)
+
+# ---------------------------------------------------------------------------
 # eBay QİYMƏT TƏKLİFİ
 # ---------------------------------------------------------------------------
 # Hədəf marja faizi — yeni eBay qiyməti bunu qorumaq üçün hesablanır.
