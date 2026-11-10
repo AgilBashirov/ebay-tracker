@@ -353,6 +353,28 @@ def build_prompt(mine: dict, candidates: list[dict]) -> str:
 # ---------------------------------------------------------------------------
 MAX_IMAGE_BYTES = 1_500_000
 
+# Only eBay's own image CDNs. The URL arrives from the Browse API, i.e. it is
+# ultimately seller-supplied content relayed by a third party, and whatever we
+# download gets forwarded to an AI provider.
+#
+# WITHOUT THIS CHECK urllib would happily open other schemes: a url of
+# "file:///C:/.../.env" would read a local file and ship it to Gemini as a
+# base64 "image", and "http://169.254.169.254/..." would reach cloud metadata.
+_IMAGE_HOST_RE = re.compile(r"(?:^|\.)(?:ebayimg\.com|ebaystatic\.com)$", re.I)
+
+
+def _safe_image_url(url) -> str | None:
+    """Return the url only if it is https on an eBay image host."""
+    try:
+        parsed = urllib.parse.urlparse(str(url or ""))
+    except ValueError:
+        return None
+    if parsed.scheme.lower() != "https":
+        return None
+    if not _IMAGE_HOST_RE.search((parsed.hostname or "").lower()):
+        return None
+    return parsed.geturl()
+
 
 def _fetch_image(url: str):
     """
@@ -361,7 +383,10 @@ def _fetch_image(url: str):
     """
     if not url:
         return None
-    small = re.sub(r"s-l\d+", "s-l500", url)
+    small = _safe_image_url(re.sub(r"s-l\d+", "s-l500", str(url)))
+    if not small:
+        print("[ai] image skipped: not an https eBay image url")
+        return None
     try:
         with urllib.request.urlopen(small, timeout=20) as resp:
             raw = resp.read(MAX_IMAGE_BYTES + 1)

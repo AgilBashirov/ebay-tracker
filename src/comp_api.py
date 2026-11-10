@@ -33,6 +33,7 @@ tested on its own before the engine exists.
 """
 import argparse
 import csv
+import hmac
 import io
 import json
 import os
@@ -182,6 +183,30 @@ def health() -> dict:
 class Handler(BaseHTTPRequestHandler):
     server_version = "ebay-competitors/1.0"
     require_token = False
+    loopback_only = True
+    expected_port = 0
+
+    def _host_allowed(self) -> bool:
+        """
+        Reject DNS-rebinding requests.
+
+        A malicious page can point attacker.com at 127.0.0.1 and then read our
+        replies, because to the browser it is same-origin. Binding to loopback
+        does NOT stop that — only checking the Host header does. We also refuse
+        anything carrying an Origin header: no browser page is meant to call
+        this API, so an Origin means a cross-site request, which would at the
+        very least burn the eBay and AI budget.
+        """
+        if self.headers.get("Origin"):
+            return False
+        if not self.loopback_only:
+            return True          # public mode is guarded by the token instead
+        host = (self.headers.get("Host") or "").strip()
+        if host.startswith("["):                      # [::1]:8787
+            hostname = host[1:host.find("]")] if "]" in host else host
+        else:
+            hostname = host.split(":")[0]
+        return hostname.lower() in ("127.0.0.1", "localhost", "::1", "")
 
     def _send(self, code: int, body: str, content_type: str) -> None:
         raw = body.encode("utf-8")
@@ -212,7 +237,12 @@ class Handler(BaseHTTPRequestHandler):
         given = (self.headers.get("Authorization") or "").strip()
         if given.lower().startswith("bearer "):
             given = given[7:].strip()
-        return bool(token) and given == token
+        if not token:
+            return False
+        # Constant-time compare so the response time cannot leak the token
+        # one character at a time.
+        return hmac.compare_digest(given.encode("utf-8"),
+                                   token.encode("utf-8"))
 
     def do_HEAD(self):
         self.do_GET()
@@ -221,6 +251,11 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         params = {k: v[0] for k, v in urllib.parse.parse_qs(parsed.query).items()}
         route = parsed.path.rstrip("/") or "/"
+
+        if not self._host_allowed():
+            self._error(403, "request rejected: unexpected Host or Origin "
+                             "header (DNS-rebinding protection)")
+            return
 
         if not self._authorized():
             self._error(401, "Authorization: Bearer <COMP_API_TOKEN> required")
@@ -359,7 +394,11 @@ def build_server(host: str, port: int) -> ThreadingHTTPServer:
             "set.\nTo protect your API keys, add COMP_API_TOKEN=... to .env or "
             "use --host 127.0.0.1.")
 
-    handler = type("BoundHandler", (Handler,), {"require_token": public})
+    handler = type("BoundHandler", (Handler,), {
+        "require_token": public,
+        "loopback_only": not public,
+        "expected_port": port,
+    })
     return ThreadingHTTPServer((host, port), handler)
 
 
