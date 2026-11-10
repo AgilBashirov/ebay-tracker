@@ -22,6 +22,14 @@ for _stream in (sys.stdout, sys.stderr):
 sys.path[:0] = [os.path.dirname(os.path.abspath(__file__)),
                 os.path.join(os.path.dirname(os.path.abspath(__file__)), "src")]
 
+# This suite does NOT mock ebay_api, so the eBay keys MUST be blank here.
+# Otherwise - with a .env file or an exported variable present - main.py
+# issues real Browse API calls, the fake listing ids come back 404, and the
+# expected statuses change. Tests must run on fake data only.
+for _key in ("EBAY_CLIENT_ID", "EBAY_CLIENT_SECRET",
+             "EBAY_DEV_ID", "EBAY_AUTH_TOKEN"):
+    os.environ[_key] = ""
+
 os.environ.setdefault("EBAY_AD_RATE_PCT", "4")
 os.environ.setdefault("SALES_TAX_PCT", "10")
 os.environ.setdefault("EBAY_FVF_PCT", "13.6")

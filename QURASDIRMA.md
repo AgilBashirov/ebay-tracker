@@ -76,11 +76,16 @@ Botunuz artıq hazırdır: `@ebay_daily_bot`
 1. Telegram-da **@ebay_daily_bot**-u açın və **Start** düyməsinə basın (və ya `/start` yazın)
 2. Brauzerdə bu ünvanı açın:
    ```
-   https://api.telegram.org/bot8877814507:AAG0_XgcOAIOoTMR5bzAOR_j1S3aHRvcUus/getUpdates
+   https://api.telegram.org/bot<BOTFATHER-DƏN_ALDIĞINIZ_TOKEN>/getUpdates
    ```
 3. Açılan mətndə `"chat":{"id":123456789` hissəsini tapın — həmin rəqəm sizin chat ID-nizdir
 
-> ⚠️ Bot tokeni parolunuz kimidir — heç kimlə paylaşmayın. Əgər kiməsə göstərilibsə, @BotFather-də `/revoke` ilə yenisini alın.
+> ⚠️ **Bot tokeni parolunuz kimidir — bu sənədə YAZMAYIN.**
+>
+> Token əvvəllər buradaca açıq mətnlə yazılmışdı, repo isə publicdir —
+> yəni həmin token git tarixçəsində qalıb və hər kəs oxuya bilər.
+> Fayldan silmək KİFAYƏT DEYİL. @BotFather-də `/revoke` edib yeni token
+> alın və onu YALNIZ GitHub Secrets-ə yazın.
 
 ### Addım 4 — GitHub Secrets əlavə edin
 
@@ -91,7 +96,7 @@ Bunları bir-bir əlavə edin:
 | Secret adı | Dəyəri |
 |---|---|
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | 2-ci addımdakı JSON faylının **bütün məzmunu** |
-| `TELEGRAM_TOKEN` | `8877814507:AAG0_XgcOAIOoTMR5bzAOR_j1S3aHRvcUus` |
+| `TELEGRAM_TOKEN` | BotFather-dən aldığınız token |
 | `TELEGRAM_CHAT_ID` | 3-cü addımda tapdığınız rəqəm |
 | `SHEET_ID` | `1h5DJGfwCYPSUyMhzMcxHC-5NJQhnS8qXPVD_nfOF7tE` |
 

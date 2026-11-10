@@ -1,8 +1,40 @@
 """
 Konfiqurasiya — bütün ayarlar burada.
 Həssas məlumatlar (token, açar) GitHub Secrets-dən gəlir, bu fayla YAZILMIR.
+For local runs a .env file in the repo root is also loaded (it is gitignored).
 """
 import os
+
+
+def _load_dotenv() -> None:
+    """
+    Load the repo-root .env file into the environment, with no pip dependency.
+
+    WHY: on GitHub Actions the keys come from Secrets, but running
+    `python src/competitors.py --item ...` locally meant exporting them by
+    hand every time.
+
+    Values ALREADY present in the environment are NOT overwritten, so GitHub
+    Actions always wins.
+    """
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            lines = fh.readlines()
+    except OSError:
+        return
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, _, value = line.partition("=")
+        name = name.strip()
+        value = value.strip().strip('"').strip("'")
+        if name and name not in os.environ:
+            os.environ[name] = value
+
+
+_load_dotenv()
 
 # ---------------------------------------------------------------------------
 # GOOGLE SHEET
@@ -408,3 +440,108 @@ def _resolve_scrape_method() -> str:
 
 
 SCRAPE_METHOD = _resolve_scrape_method()
+
+
+# ---------------------------------------------------------------------------
+# COMPETITOR LOOKUP (separate feature - src/competitors.py)
+# ---------------------------------------------------------------------------
+# Finds other sellers offering the SAME product as your listing. Fully
+# separate from price tracking: its own workflow, its own worksheets, and it
+# never touches Sheet1.
+
+# Worksheets the results are written to (created automatically).
+COMP_SHEET_NAME = os.environ.get("COMP_SHEET_NAME", "Competitors")
+COMP_CACHE_SHEET = os.environ.get("COMP_CACHE_SHEET", "Competitor_cache")
+
+# How many products per run, and how often each one is rechecked.
+COMP_PRODUCTS_PER_RUN = int(os.environ.get("COMP_PRODUCTS_PER_RUN", "10"))
+COMP_RECHECK_DAYS = float(os.environ.get("COMP_RECHECK_DAYS", "1"))
+
+# Candidates sent to the AI, and the prefilter threshold.
+# Lowering COMP_MIN_SCORE burns the AI quota quickly; raising it loses real
+# competitors. Candidates found by GTIN/EPID bypass this threshold.
+COMP_MAX_CANDIDATES = int(os.environ.get("COMP_MAX_CANDIDATES", "30"))
+COMP_MIN_SCORE = float(os.environ.get("COMP_MIN_SCORE", "0.18"))
+
+# Below this AI confidence the result becomes CHECK instead of COMPETITOR.
+COMP_MIN_CONFIDENCE = float(os.environ.get("COMP_MIN_CONFIDENCE", "75"))
+
+# Max eBay calls per run. The daily 5,000 limit is SHARED with price
+# tracking, so we cap it and stop cleanly when the budget runs out.
+COMP_MAX_API_CALLS = int(os.environ.get("COMP_MAX_API_CALLS", "1500"))
+
+# How many fastest-selling competitors are flagged as TOP COMPETITOR.
+COMP_TOP_N = int(os.environ.get("COMP_TOP_N", "3"))
+
+# An AI verdict is cached this many days (as long as the listing is unchanged).
+COMP_VERDICT_TTL_DAYS = float(os.environ.get("COMP_VERDICT_TTL_DAYS", "30"))
+
+# Image search (experimental - disabled automatically if eBay returns 401/403).
+COMP_IMAGE_SEARCH = _flag("COMP_IMAGE_SEARCH", True)
+
+# Shipping cost is calculated for this destination: "country,postcode".
+# eBay prices shipping per buyer location, so without a fixed point the
+# "total" column would not be comparable between sellers.
+COMP_SHIP_TO = os.environ.get("COMP_SHIP_TO", "US,10001")
+
+# Restrict the search to listings in this country (empty = no restriction).
+COMP_ITEM_LOCATION = os.environ.get("COMP_ITEM_LOCATION", "")
+
+# Sellers excluded from results (comma separated). Your own name is always
+# excluded automatically.
+COMP_EXCLUDE_SELLERS = os.environ.get("COMP_EXCLUDE_SELLERS", "")
+
+# Send a short silent Telegram summary in --all mode.
+COMP_TELEGRAM = _flag("COMP_TELEGRAM", True)
+
+# Accept a competitor on title evidence alone (no GTIN/EPID/MPN proof) when
+# the title score reaches this value and the brand matches.
+#
+# DISABLED BY DEFAULT (0). This is the only path that can produce a false
+# positive: a listing that omits its size from both title and aspects would
+# be accepted as identical. With it off, such cases become CHECK instead.
+# Set it to about 0.70 if you would rather have more coverage.
+COMP_TITLE_PROOF_SCORE = float(os.environ.get("COMP_TITLE_PROOF_SCORE", "0"))
+
+# Token for the local HTTP API (src/comp_api.py).
+# The API binds to 127.0.0.1 by default, so this may stay empty. It becomes
+# MANDATORY with --host 0.0.0.0, otherwise anyone could burn your daily eBay
+# (5000) and free AI quota.
+COMP_API_TOKEN = os.environ.get("COMP_API_TOKEN", "")
+
+# ---------------------------------------------------------------------------
+# FREE AI (the competitor judge)
+# ---------------------------------------------------------------------------
+# Providers are tried in order: when one hits its daily limit we move to the
+# next. Limit NUMBERS are deliberately not hardcoded - providers change them
+# often, so we only react to the 429 signal in the response.
+#
+# Free keys:
+#   Gemini -> aistudio.google.com/apikey
+#   Groq   -> console.groq.com/keys
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_MODELS = os.environ.get(
+    "GEMINI_MODELS", "gemini-flash-latest,gemini-flash-lite-latest")
+
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
+
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
+OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "")
+
+OLLAMA_URL = os.environ.get("OLLAMA_URL", "")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "")
+
+# Set the chain by hand: "gemini:gemini-flash-latest,groq:openai/gpt-oss-120b"
+AI_CHAIN = os.environ.get("AI_CHAIN", "")
+
+# Candidates per request. Too many confuses the model, too few wastes calls.
+AI_BATCH_SIZE = int(os.environ.get("AI_BATCH_SIZE", "8"))
+
+# Send images too (text does not always reveal a size or colour difference).
+AI_USE_IMAGES = _flag("AI_USE_IMAGES", True)
+AI_IMAGES_OPENAI = _flag("AI_IMAGES_OPENAI", False)
+
+# Description truncation limit (characters). My own product gets more room.
+AI_DESC_CHARS = int(os.environ.get("AI_DESC_CHARS", "700"))
+AI_DESC_CHARS_MINE = int(os.environ.get("AI_DESC_CHARS_MINE", "1500"))
